@@ -12,10 +12,7 @@ export const expensesFinalizeHandler = new Elysia()
         ctx.set.status = 404;
         return { error: "Expense not found" };
       }
-      const balances = computeBalances(
-        expense,
-        ctx.body?.memberIds ?? [],
-      );
+      const balances = computeBalances(expense, ctx.body?.memberIds ?? []);
       return { expense, balances };
     },
     {

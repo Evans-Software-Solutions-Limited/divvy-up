@@ -11,9 +11,7 @@ const AssignmentSchema = t.Union([
   t.Object({ type: t.Literal("everyone") }),
   t.Object({
     type: t.Literal("custom"),
-    shares: t.Array(
-      t.Object({ memberId: t.String(), fraction: t.Number() }),
-    ),
+    shares: t.Array(t.Object({ memberId: t.String(), fraction: t.Number() })),
   }),
 ]);
 
