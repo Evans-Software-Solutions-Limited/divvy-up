@@ -1,10 +1,9 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Badge } from '@/components/ui/badge';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogTitle } from '@/components/ui/alert-dialog';
 
 /**
@@ -145,7 +144,6 @@ export function ReceiptReview({ onFinalize }: ReceiptReviewProps) {
   const [tip, setTip] = useState(MOCK_RECEIPT.tip);
   const [discount, setDiscount] = useState(0);
 
-  const [selectedItem, setSelectedItem] = useState<string | null>(null);
   const [showFinalize, setShowFinalize] = useState(false);
 
   const balances = useMemo(() => {
@@ -211,8 +209,7 @@ export function ReceiptReview({ onFinalize }: ReceiptReviewProps) {
             return (
               <div
                 key={item.id}
-                className="border rounded-lg p-4 space-y-3 cursor-pointer hover:bg-gray-50"
-                onClick={() => setSelectedItem(item.id)}
+                className="border rounded-lg p-4 space-y-3"
               >
                 <div className="flex justify-between items-start">
                   <div>
