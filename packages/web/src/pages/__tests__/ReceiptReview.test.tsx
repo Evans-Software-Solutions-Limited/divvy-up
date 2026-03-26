@@ -35,7 +35,7 @@ function calculateBalances(
   assignments: ItemAssignment[],
   taxAmount: number,
   tipAmount: number,
-  discountAmount: number
+  discountAmount: number,
 ): CalculatedBalance[] {
   const owedByMember: Record<string, number> = {};
   MOCK_MEMBERS.forEach((m) => {
@@ -61,9 +61,11 @@ function calculateBalances(
         owedByMember[m.id] += perPerson;
       });
     } else if (assignment.mode === "custom" && assignment.customShares) {
-      Object.entries(assignment.customShares).forEach(([memberId, fraction]) => {
-        owedByMember[memberId] += itemTotal * fraction;
-      });
+      Object.entries(assignment.customShares).forEach(
+        ([memberId, fraction]) => {
+          owedByMember[memberId] += itemTotal * fraction;
+        },
+      );
     }
   });
 
@@ -71,7 +73,8 @@ function calculateBalances(
   const totalOwed = Object.values(owedByMember).reduce((a, b) => a + b, 0);
   if (totalOwed > 0) {
     Object.keys(owedByMember).forEach((memberId) => {
-      owedByMember[memberId] += (taxAmount * owedByMember[memberId]) / totalOwed;
+      owedByMember[memberId] +=
+        (taxAmount * owedByMember[memberId]) / totalOwed;
     });
   }
 
@@ -214,7 +217,7 @@ describe("ReceiptReview Balance Calculation", () => {
         assignments,
         100, // $1 tax
         300, // $3 tip
-        0
+        0,
       );
 
       // Each person gets $10/3 + tax share + $3/3 tip
@@ -252,7 +255,9 @@ describe("ReceiptReview Balance Calculation", () => {
       expect(balances.length).toBe(2);
       const bobBalance = balances.find((b) => b.fromMemberId === "bob");
       const charlieBalance = balances.find((b) => b.fromMemberId === "charlie");
-      expect(bobBalance?.amount || 0).toBeGreaterThan(charlieBalance?.amount || 0);
+      expect(bobBalance?.amount || 0).toBeGreaterThan(
+        charlieBalance?.amount || 0,
+      );
     });
   });
 
@@ -274,7 +279,7 @@ describe("ReceiptReview Balance Calculation", () => {
         assignments,
         0,
         0,
-        300 // $3 discount
+        300, // $3 discount
       );
 
       // Each person owes $10/3 - $3/3 = $7/3 ≈ $2.33
