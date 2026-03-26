@@ -5,11 +5,15 @@ import openapi from "@elysiajs/openapi";
 
 import { groupsListHandler } from "./application/groups/list/groupsListHandler";
 import { expensesCreateHandler } from "./application/expenses/create/expensesCreateHandler";
+import { expensesItemAssignmentHandler } from "./application/expenses/items/assignment/expensesItemAssignmentHandler";
+import { expensesFinalizeHandler } from "./application/expenses/finalize/expensesFinalizeHandler";
 
 const app = new Elysia()
   .use(openapi())
   .use(groupsListHandler)
-  .use(expensesCreateHandler);
+  .use(expensesCreateHandler)
+  .use(expensesItemAssignmentHandler)
+  .use(expensesFinalizeHandler);
 
 export type CoreApi = typeof app;
 

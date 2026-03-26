@@ -7,10 +7,21 @@ const ExtractedItemSchema = t.Object({
   quantity: t.Number(),
 });
 
-const ReceiptExtractResultSchema = t.Object({
+/**
+ * Full OCR result schema — mirrors OcrExtractResult.
+ * All monetary amounts are in minor currency units (e.g. cents for USD).
+ */
+const OcrExtractResultSchema = t.Object({
+  merchant: t.Nullable(t.String()),
+  date: t.Nullable(t.String()),
+  currency: t.String(),
+  subtotal: t.Number(),
+  tax: t.Number(),
+  tip: t.Number(),
+  total: t.Number(),
   items: t.Array(ExtractedItemSchema),
-  /** Raw text returned by OCR, useful for debugging */
   rawText: t.Optional(t.String()),
+  groupId: t.Optional(t.String()),
 });
 
 export const receiptExtractHandler = new Elysia()
@@ -20,6 +31,7 @@ export const receiptExtractHandler = new Elysia()
     async (ctx) => {
       const result = await ctx.ReceiptExtractRepository.extract(
         ctx.body.imageKey,
+        ctx.body.groupId,
       );
       return result;
     },
@@ -27,9 +39,14 @@ export const receiptExtractHandler = new Elysia()
       body: t.Object({
         /** S3 key of the uploaded receipt image */
         imageKey: t.String(),
+        /**
+         * Group this receipt belongs to. Returned in the response so the
+         * caller can immediately POST /expenses with the extracted data.
+         */
+        groupId: t.Optional(t.String()),
       }),
       response: {
-        200: ReceiptExtractResultSchema,
+        200: OcrExtractResultSchema,
       },
     },
   );

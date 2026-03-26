@@ -38,6 +38,11 @@ export type Expense = {
   receiptImageKey?: string;
   items: ReceiptItem[];
   adjustments: ReceiptAdjustment[];
+  status: ExpenseStatus;
+  /** Merchant name from OCR extraction, if available */
+  merchant?: string;
+  /** ISO 4217 currency code, defaults to USD */
+  currency: string;
 };
 
 // ─── Receipt item ─────────────────────────────────────────────────────────────
@@ -77,6 +82,10 @@ export type ReceiptAdjustment = {
   /** If true the amount is a percentage of the subtotal (0–100) */
   isPercent: boolean;
 };
+
+// ─── Expense status ───────────────────────────────────────────────────────────
+
+export type ExpenseStatus = "draft" | "finalized";
 
 // ─── Balance ──────────────────────────────────────────────────────────────────
 
