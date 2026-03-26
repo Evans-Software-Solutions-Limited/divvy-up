@@ -19,6 +19,11 @@ const CreateExpenseBodySchema = t.Object({
   payerId: t.String(),
   description: t.String(),
   date: t.String(),
+  /** ISO 4217 currency code, defaults to USD */
+  currency: t.String({ default: "USD" }),
+  /** Merchant name from receipt, if known */
+  merchant: t.Optional(t.String()),
+  receiptImageKey: t.Optional(t.String()),
   items: t.Array(ReceiptItemInputSchema),
   adjustments: t.Optional(t.Array(AdjustmentInputSchema)),
 });
