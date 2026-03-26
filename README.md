@@ -1,81 +1,65 @@
-# Monorepo Template
+# Divvy Up
 
-A template to create a monorepo SST v3 project. [Learn more](https://sst.dev/docs/set-up-a-monorepo).
+A lightweight mobile-first shared expense app for small groups, trips, and household costs — with receipt scanning and item-level split assignment as the core differentiator.
 
-## Get started
+## What it does
 
-1. Use this template to [create your own repo](https://docs.github.com/en/repositories/creating-and-managing-repositories/creating-a-repository-from-a-template).
+1. Create a group and invite members.
+2. Photograph or upload a receipt.
+3. Review the extracted line items (OCR/vision).
+4. Assign each item: one person, split equally, everyone, or custom shares.
+5. Add receipt-level adjustments: tax, tip, discount.
+6. See clear balances showing who owes what.
 
-2. Clone the new repo.
+## First Milestone Scope
 
-   ```bash
-   git clone <REPO_URL> MY_APP
-   cd MY_APP
-   ```
+- Group creation and member management
+- Expense creation with payer
+- Receipt image upload/capture
+- OCR/vision extraction into structured receipt items
+- Item-level assignment (one person / equal split / everyone / custom)
+- Receipt-level adjustments (tax, tip, discount)
+- Group balance summary
 
-3. Rename the files in the project to the name of your app.
+**Out of scope for V1**: bank integrations, direct money movement, budgeting dashboards, multi-currency settlement, full offline sync, social feed/chat.
 
-   ```bash
-   npx replace-in-file '/sst-monorepo-template/g' 'MY_APP' '**/*.*' --verbose
-   ```
+## Architecture
 
-4. Deploy!
+- **Mobile**: Expo / React Native (primary surface)
+- **Web**: React + Vite (companion / admin)
+- **Backend**: Elysia on AWS Lambda via SST v3
+- **Database**: Postgres (via RDS or Neon)
+- **Storage**: S3 for receipt images
+- **OCR path**: Lambda calling a vision API, returning structured JSON
 
-   ```bash
-   bun install
-   bun run dev
-   ```
+## Repo Structure
 
-## Usage
+```
+microservices/
+  core/            # Groups, members, expenses, receipt items, assignments
+  receipt-service/ # OCR/vision extraction path (scaffold)
+packages/
+  web/             # React + Vite web companion
+  api-utils/       # Shared JWT, env, logger utilities
+infra/             # SST infrastructure definitions
+docs/              # Product docs and work orders
+```
 
-This repo uses [Bun workspaces](https://bun.com/docs/pm/workspaces) with [Turborepo](https://turbo.build/repo). It has 3 packages to start with and you can add more.
+## Getting Started
 
-1. `core/`
+```bash
+bun install
+bun run dev        # starts SST dev + web dev server
+bun run test       # unit tests via Vitest/Turbo
+bun run typecheck  # TypeScript check
+bun run lint       # ESLint
+bun run prettier:check  # Prettier
+```
 
-   This is for any shared code. It's defined as modules. For example, there's the `Example` module.
+> **Note:** Use `bun run test` (not `bun test`). Tests use Vitest; `bun test` runs Bun's built-in runner and will fail.
 
-   ```ts
-   export module Example {
-     export function hello() {
-       return "Hello, world!";
-     }
-   }
-   ```
+## Docs
 
-   That you can use across other packages using.
-
-   ```ts
-   import { Example } from "@aws-monorepo/core/example";
-
-   Example.hello();
-   ```
-
-   We also have [Vitest](https://vitest.dev/) configured for testing. Run the test suite with:
-
-   ```bash
-   bun run test
-   ```
-
-   **Note:** Use `bun run test` (not `bun test`). Tests use Vitest; `bun test` runs Bun's built-in runner and will fail. The `test` script runs Vitest via Turbo.
-
-2. `functions/`
-
-   This is for your Lambda functions and it uses the `core` package as a local dependency.
-
-3. `scripts/`
-
-   This is for any scripts that you can run on your SST app using the `sst shell` CLI and [`tsx`](https://www.npmjs.com/package/tsx). For example, you can run the example script using:
-
-   ```bash
-   bun run shell src/example.ts
-   ```
-
-### Infrastructure
-
-The `infra/` directory allows you to logically split the infrastructure of your app into separate files. This can be helpful as your app grows.
-
-In the template, we have an `api.ts`, and `storage.ts`. These export the created resources. And are imported in the `sst.config.ts`.
-
----
-
-**Join our community** [Discord](https://sst.dev/discord) | [YouTube](https://www.youtube.com/c/sst-dev) | [X.com](https://x.com/SST_dev)
+- [Product overview](docs/divvy-up-product.md)
+- [Work order](docs/divvy-up-work-order.md)
+- [Deployment guide](docs/next-steps-deployments.md)

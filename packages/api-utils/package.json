@@ -1,5 +1,5 @@
 {
-  "name": "@sst-monorepo-template/api-utils",
+  "name": "@divvy-up/api-utils",
   "version": "0.0.0",
   "type": "module",
   "exports": {

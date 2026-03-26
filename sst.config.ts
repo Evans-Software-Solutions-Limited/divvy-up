@@ -3,7 +3,7 @@
 export default $config({
   app(input) {
     return {
-      name: "sst-monorepo-template",
+      name: "divvy-up",
       removal: input?.stage === "production" ? "retain" : "remove",
       protect: ["production"].includes(input?.stage),
       home: "aws",
@@ -14,6 +14,7 @@ export default $config({
     const web = await import("./infra/web");
     return {
       api: api.coreAPI.url,
+      receiptApi: api.receiptServiceAPI.url,
       web: $dev ? "http://localhost:5173" : web.frontend.url,
     };
   },

@@ -1,10 +1,15 @@
+// Core API: groups, members, expenses, receipt items, assignments, balances
 export const coreAPI = new sst.aws.ApiGatewayV2("api-core");
-export const otherServiceAPI = new sst.aws.ApiGatewayV2("api-other-service");
+
+// Receipt service: OCR/vision extraction path (POST /receipts/extract)
+export const receiptServiceAPI = new sst.aws.ApiGatewayV2(
+  "api-receipt-service",
+);
 
 coreAPI.route("$default", "microservices/core/src/api.handler");
-otherServiceAPI.route(
+receiptServiceAPI.route(
   "$default",
   "microservices/other-service/src/api.handler",
 );
 
-// api.addAuthorizer
+// TODO: add JWT authorizer once auth is wired up

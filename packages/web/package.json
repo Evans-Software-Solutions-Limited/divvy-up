@@ -1,5 +1,5 @@
 {
-  "name": "@sst-monorepo-template/web",
+  "name": "@divvy-up/web",
   "private": true,
   "version": "0.0.0",
   "type": "module",
@@ -13,7 +13,7 @@
     "preview": "vite preview"
   },
   "dependencies": {
-    "@sst-monorepo-template/core": "workspace:*",
+    "@divvy-up/core": "workspace:*",
     "@base-ui/react": "^1.1.0",
     "@elysiajs/eden": "^1.4.8",
     "@fontsource-variable/figtree": "^5.2.10",
