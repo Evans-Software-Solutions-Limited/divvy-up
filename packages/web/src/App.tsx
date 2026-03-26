@@ -3,7 +3,7 @@ import { Routes, Route } from "react-router";
 import Home from "./pages/Home";
 import Login from "./pages/Login";
 import Balances from "./pages/Balances";
-import ReceiptReview from "./pages/ReceiptReview";
+import { ReceiptReview } from "./pages/ReceiptReview";
 import { ThemeProvider } from "./components/theme-provider";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
