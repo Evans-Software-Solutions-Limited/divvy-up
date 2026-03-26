@@ -1,5 +1,5 @@
 {
-  "name": "@sst-monorepo-template/core",
+  "name": "@divvy-up/core",
   "version": "0.0.0",
   "type": "module",
   "exports": {
