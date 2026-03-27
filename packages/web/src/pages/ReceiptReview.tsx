@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useParams, useLocation } from "react-router";
-import { useQuery, useMutation } from "@tanstack/react-query";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,6 +37,7 @@ function formatCurrency(cents: number) {
 export function ReceiptReview() {
   const { id: expenseId } = useParams<{ id: string }>();
   const location = useLocation();
+  const queryClient = useQueryClient();
   // Members are passed via navigation state from the upstream flow.
   // Until group member persistence is wired, the caller must supply them.
   const members: Member[] = useMemo(
@@ -98,6 +99,7 @@ export function ReceiptReview() {
     onSuccess: (data) => {
       setFinalizeResult(data);
       setShowFinalize(false);
+      queryClient.setQueryData(["expense", expenseId], data.expense);
     },
   });
 
