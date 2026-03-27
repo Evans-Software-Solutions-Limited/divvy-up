@@ -1,127 +1,80 @@
 import { describe, it, expect } from "vitest";
+import { computeBalancesPreview } from "@/lib/balances";
+import type { Expense, Member } from "@divvy-up/core";
 
 /**
- * Test the balance calculation logic for receipt item assignment.
- * This mirrors the calculateBalances function used in ReceiptReview.tsx
+ * Tests for the balance preview helper used in ReceiptReview.
+ *
+ * This function mirrors the backend computeBalances algorithm. Keeping these
+ * tests aligned with the backend finalize handler tests ensures UI and
+ * backend produce identical numbers.
  */
 
-interface ItemAssignment {
-  itemId: string;
-  mode: "one" | "equal" | "everyone" | "custom";
-  assignedMemberIds: string[];
-  customShares?: Record<string, number>;
-}
-
-interface MockItem {
-  id: string;
-  unitPrice: number;
-  quantity: number;
-}
-
-interface CalculatedBalance {
-  fromMemberId: string;
-  toMemberId: string;
-  amount: number;
-}
-
-const MOCK_MEMBERS = [
-  { id: "alice", name: "Alice" },
-  { id: "bob", name: "Bob" },
-  { id: "charlie", name: "Charlie" },
+const MEMBERS: Member[] = [
+  { id: "alice", groupId: "group-1", name: "Alice" },
+  { id: "bob", groupId: "group-1", name: "Bob" },
+  { id: "charlie", groupId: "group-1", name: "Charlie" },
 ];
 
-function calculateBalances(
-  items: MockItem[],
-  assignments: ItemAssignment[],
-  taxAmount: number,
-  tipAmount: number,
-  discountAmount: number,
-): CalculatedBalance[] {
-  const owedByMember: Record<string, number> = {};
-  MOCK_MEMBERS.forEach((m) => {
-    owedByMember[m.id] = 0;
-  });
-
-  assignments.forEach((assignment) => {
-    const item = items.find((i) => i.id === assignment.itemId);
-    if (!item) return;
-
-    const itemTotal = item.unitPrice * item.quantity;
-
-    if (assignment.mode === "one") {
-      owedByMember[assignment.assignedMemberIds[0]] += itemTotal;
-    } else if (assignment.mode === "equal") {
-      const perPerson = itemTotal / assignment.assignedMemberIds.length;
-      assignment.assignedMemberIds.forEach((memberId) => {
-        owedByMember[memberId] += perPerson;
-      });
-    } else if (assignment.mode === "everyone") {
-      const perPerson = itemTotal / MOCK_MEMBERS.length;
-      MOCK_MEMBERS.forEach((m) => {
-        owedByMember[m.id] += perPerson;
-      });
-    } else if (assignment.mode === "custom" && assignment.customShares) {
-      Object.entries(assignment.customShares).forEach(
-        ([memberId, fraction]) => {
-          owedByMember[memberId] += itemTotal * fraction;
-        },
-      );
-    }
-  });
-
-  // Distribute tax proportionally
-  const totalOwed = Object.values(owedByMember).reduce((a, b) => a + b, 0);
-  if (totalOwed > 0) {
-    Object.keys(owedByMember).forEach((memberId) => {
-      owedByMember[memberId] +=
-        (taxAmount * owedByMember[memberId]) / totalOwed;
-    });
-  }
-
-  // Distribute tip evenly
-  const tipPerPerson = tipAmount / MOCK_MEMBERS.length;
-  MOCK_MEMBERS.forEach((m) => {
-    owedByMember[m.id] += tipPerPerson;
-  });
-
-  // Apply discount evenly
-  const discountPerPerson = discountAmount / MOCK_MEMBERS.length;
-  MOCK_MEMBERS.forEach((m) => {
-    owedByMember[m.id] -= discountPerPerson;
-  });
-
-  // Convert to pairwise balances (payer is first member)
-  const payer = MOCK_MEMBERS[0];
-  const balances: CalculatedBalance[] = [];
-
-  MOCK_MEMBERS.forEach((member) => {
-    if (member.id !== payer.id && owedByMember[member.id] > 0) {
-      balances.push({
-        fromMemberId: member.id,
-        toMemberId: payer.id,
-        amount: Math.round(owedByMember[member.id]),
-      });
-    }
-  });
-
-  return balances;
+function makeExpense(
+  overrides: Partial<Expense> & {
+    items: Expense["items"];
+  },
+): Expense {
+  return {
+    id: "exp-1",
+    groupId: "group-1",
+    payerId: "alice",
+    description: "Test",
+    date: "2026-03-26",
+    currency: "USD",
+    status: "draft",
+    adjustments: [],
+    ...overrides,
+  };
 }
 
-describe("ReceiptReview Balance Calculation", () => {
-  describe("one person assignment", () => {
-    it("should assign entire item cost to one person", () => {
-      const items: MockItem[] = [
-        { id: "item-1", unitPrice: 1000, quantity: 1 }, // $10
-      ];
-      const assignments: ItemAssignment[] = [
-        {
-          itemId: "item-1",
-          mode: "one",
-          assignedMemberIds: ["bob"],
-        },
-      ];
+describe("computeBalancesPreview", () => {
+  describe("empty members guard", () => {
+    it("returns empty array when members list is empty", () => {
+      // This mirrors the ReceiptReview canFinalize guard: calling with no
+      // members would skip type:'everyone' items and send memberIds:[] to
+      // finalize, producing incorrect balances.
+      const expense = makeExpense({
+        items: [
+          {
+            id: "item-1",
+            expenseId: "exp-1",
+            description: "Shared item",
+            unitPrice: 3000,
+            quantity: 1,
+            assignment: { type: "everyone" },
+          },
+        ],
+      });
 
-      const balances = calculateBalances(items, assignments, 0, 0, 0);
+      const balances = computeBalancesPreview(expense, []);
+
+      expect(balances).toHaveLength(0);
+    });
+  });
+
+  describe("one person assignment", () => {
+    it("assigns entire item cost to one person", () => {
+      const expense = makeExpense({
+        items: [
+          {
+            id: "item-1",
+            expenseId: "exp-1",
+            description: "Burger",
+            unitPrice: 1000,
+            quantity: 1,
+            assignment: { type: "one", memberId: "bob" },
+          },
+        ],
+      });
+
+      const balances = computeBalancesPreview(expense, MEMBERS);
 
       expect(balances).toHaveLength(1);
       expect(balances[0]).toEqual({
@@ -133,158 +86,202 @@ describe("ReceiptReview Balance Calculation", () => {
   });
 
   describe("equal split assignment", () => {
-    it("should split evenly among selected members", () => {
-      const items: MockItem[] = [
-        { id: "item-1", unitPrice: 1200, quantity: 1 }, // $12
-      ];
-      const assignments: ItemAssignment[] = [
-        {
-          itemId: "item-1",
-          mode: "equal",
-          assignedMemberIds: ["bob", "charlie"],
-        },
-      ];
+    it("splits evenly among selected members", () => {
+      const expense = makeExpense({
+        items: [
+          {
+            id: "item-1",
+            expenseId: "exp-1",
+            description: "Pizza",
+            unitPrice: 1200,
+            quantity: 1,
+            assignment: { type: "equal", memberIds: ["bob", "charlie"] },
+          },
+        ],
+      });
 
-      const balances = calculateBalances(items, assignments, 0, 0, 0);
+      const balances = computeBalancesPreview(expense, MEMBERS);
 
       expect(balances).toHaveLength(2);
-      expect(balances[0].amount).toBe(600); // $6 each
-      expect(balances[1].amount).toBe(600);
+      expect(balances.every((b) => b.amount === 600)).toBe(true);
     });
   });
 
   describe("everyone assignment", () => {
-    it("should split evenly among all group members", () => {
-      const items: MockItem[] = [
-        { id: "item-1", unitPrice: 3000, quantity: 1 }, // $30
-      ];
-      const assignments: ItemAssignment[] = [
-        {
-          itemId: "item-1",
-          mode: "everyone",
-          assignedMemberIds: MOCK_MEMBERS.map((m) => m.id),
-        },
-      ];
+    it("splits evenly among all group members", () => {
+      const expense = makeExpense({
+        items: [
+          {
+            id: "item-1",
+            expenseId: "exp-1",
+            description: "Nachos",
+            unitPrice: 3000,
+            quantity: 1,
+            assignment: { type: "everyone" },
+          },
+        ],
+      });
 
-      const balances = calculateBalances(items, assignments, 0, 0, 0);
+      const balances = computeBalancesPreview(expense, MEMBERS);
 
+      // alice is payer — only bob and charlie owe
       expect(balances).toHaveLength(2);
-      expect(balances[0].amount).toBe(1000); // $10 each
-      expect(balances[1].amount).toBe(1000);
+      expect(balances.every((b) => b.amount === 1000)).toBe(true);
     });
   });
 
   describe("custom shares assignment", () => {
-    it("should assign based on custom fractions", () => {
-      const items: MockItem[] = [
-        { id: "item-1", unitPrice: 1000, quantity: 1 }, // $10
-      ];
-      const assignments: ItemAssignment[] = [
-        {
-          itemId: "item-1",
-          mode: "custom",
-          assignedMemberIds: ["bob", "charlie"],
-          customShares: {
-            bob: 0.7,
-            charlie: 0.3,
+    it("assigns based on custom fractions", () => {
+      const expense = makeExpense({
+        items: [
+          {
+            id: "item-1",
+            expenseId: "exp-1",
+            description: "Shared platter",
+            unitPrice: 1000,
+            quantity: 1,
+            assignment: {
+              type: "custom",
+              shares: [
+                { memberId: "bob", fraction: 0.7 },
+                { memberId: "charlie", fraction: 0.3 },
+              ],
+            },
           },
-        },
-      ];
+        ],
+      });
 
-      const balances = calculateBalances(items, assignments, 0, 0, 0);
+      const balances = computeBalancesPreview(expense, MEMBERS);
 
       expect(balances).toHaveLength(2);
-      expect(balances[0].amount).toBe(700); // 70%
-      expect(balances[1].amount).toBe(300); // 30%
+      const bob = balances.find((b) => b.fromMemberId === "bob");
+      const charlie = balances.find((b) => b.fromMemberId === "charlie");
+      expect(bob?.amount).toBe(700);
+      expect(charlie?.amount).toBe(300);
     });
   });
 
-  describe("tax and tip handling", () => {
-    it("should distribute tax proportionally and tip evenly", () => {
-      const items: MockItem[] = [
-        { id: "item-1", unitPrice: 1000, quantity: 1 }, // $10
-      ];
-      const assignments: ItemAssignment[] = [
-        {
-          itemId: "item-1",
-          mode: "everyone",
-          assignedMemberIds: MOCK_MEMBERS.map((m) => m.id),
-        },
-      ];
+  describe("adjustment distribution", () => {
+    it("distributes tax proportionally to item shares", () => {
+      // bob gets $10 item, charlie gets $10 item, alice (payer) gets nothing
+      // $2 tax should be split evenly between bob and charlie
+      const expense = makeExpense({
+        items: [
+          {
+            id: "item-1",
+            expenseId: "exp-1",
+            description: "Bob's item",
+            unitPrice: 1000,
+            quantity: 1,
+            assignment: { type: "one", memberId: "bob" },
+          },
+          {
+            id: "item-2",
+            expenseId: "exp-1",
+            description: "Charlie's item",
+            unitPrice: 1000,
+            quantity: 1,
+            assignment: { type: "one", memberId: "charlie" },
+          },
+        ],
+        adjustments: [{ kind: "tax", amount: 200, isPercent: false }],
+      });
 
-      const balances = calculateBalances(
-        items,
-        assignments,
-        100, // $1 tax
-        300, // $3 tip
-        0,
-      );
+      const balances = computeBalancesPreview(expense, MEMBERS);
 
-      // Each person gets $10/3 + tax share + $3/3 tip
-      // Alice (payer) pays $10/3 + tax share + $3/3
-      // Bob and Charlie owe: $10/3 + tax share + $3/3
-      expect(balances.length).toBeGreaterThan(0);
-      const bobBalance = balances.find((b) => b.fromMemberId === "bob");
-      expect(bobBalance?.amount).toBeGreaterThan(0);
+      const bob = balances.find((b) => b.fromMemberId === "bob");
+      const charlie = balances.find((b) => b.fromMemberId === "charlie");
+      // Each owes $10 item + $1 tax = $11
+      expect(bob?.amount).toBe(1100);
+      expect(charlie?.amount).toBe(1100);
+    });
+
+    it("distributes tax proportionally when shares differ", () => {
+      // bob owes $20, charlie owes $10 (2:1 ratio)
+      // $3 tip should be split 2:1 → bob +$2, charlie +$1
+      const expense = makeExpense({
+        items: [
+          {
+            id: "item-1",
+            expenseId: "exp-1",
+            description: "Bob's item",
+            unitPrice: 2000,
+            quantity: 1,
+            assignment: { type: "one", memberId: "bob" },
+          },
+          {
+            id: "item-2",
+            expenseId: "exp-1",
+            description: "Charlie's item",
+            unitPrice: 1000,
+            quantity: 1,
+            assignment: { type: "one", memberId: "charlie" },
+          },
+        ],
+        adjustments: [{ kind: "tip", amount: 300, isPercent: false }],
+      });
+
+      const balances = computeBalancesPreview(expense, MEMBERS);
+
+      const bob = balances.find((b) => b.fromMemberId === "bob");
+      const charlie = balances.find((b) => b.fromMemberId === "charlie");
+      expect(bob?.amount).toBe(2200); // 2000 + 200 tip
+      expect(charlie?.amount).toBe(1100); // 1000 + 100 tip
+    });
+
+    it("applies discount proportionally", () => {
+      const expense = makeExpense({
+        items: [
+          {
+            id: "item-1",
+            expenseId: "exp-1",
+            description: "Everyone's item",
+            unitPrice: 3000,
+            quantity: 1,
+            assignment: { type: "everyone" },
+          },
+        ],
+        adjustments: [{ kind: "discount", amount: 300, isPercent: false }],
+      });
+
+      const balances = computeBalancesPreview(expense, MEMBERS);
+
+      // each owes 1000, discount reduces by 100 each → 900
+      expect(balances).toHaveLength(2);
+      expect(balances.every((b) => b.amount === 900)).toBe(true);
     });
   });
 
   describe("multiple items with mixed assignments", () => {
-    it("should handle multiple items with different split modes", () => {
-      const items: MockItem[] = [
-        { id: "item-1", unitPrice: 1000, quantity: 1 }, // $10 - one
-        { id: "item-2", unitPrice: 2000, quantity: 1 }, // $20 - everyone
-      ];
-      const assignments: ItemAssignment[] = [
-        {
-          itemId: "item-1",
-          mode: "one",
-          assignedMemberIds: ["bob"],
-        },
-        {
-          itemId: "item-2",
-          mode: "everyone",
-          assignedMemberIds: MOCK_MEMBERS.map((m) => m.id),
-        },
-      ];
+    it("handles multiple items with different split modes", () => {
+      const expense = makeExpense({
+        items: [
+          {
+            id: "item-1",
+            expenseId: "exp-1",
+            description: "Bob only",
+            unitPrice: 1000,
+            quantity: 1,
+            assignment: { type: "one", memberId: "bob" },
+          },
+          {
+            id: "item-2",
+            expenseId: "exp-1",
+            description: "Everyone",
+            unitPrice: 2100,
+            quantity: 1,
+            assignment: { type: "everyone" },
+          },
+        ],
+      });
 
-      const balances = calculateBalances(items, assignments, 0, 0, 0);
+      const balances = computeBalancesPreview(expense, MEMBERS);
 
-      // Bob: $10 (item-1) + $20/3 (item-2) ≈ $16.67
-      // Charlie: $20/3 ≈ $6.67
-      expect(balances.length).toBe(2);
-      const bobBalance = balances.find((b) => b.fromMemberId === "bob");
-      const charlieBalance = balances.find((b) => b.fromMemberId === "charlie");
-      expect(bobBalance?.amount || 0).toBeGreaterThan(
-        charlieBalance?.amount || 0,
-      );
-    });
-  });
-
-  describe("discount handling", () => {
-    it("should apply discount evenly to all members", () => {
-      const items: MockItem[] = [
-        { id: "item-1", unitPrice: 1000, quantity: 1 }, // $10
-      ];
-      const assignments: ItemAssignment[] = [
-        {
-          itemId: "item-1",
-          mode: "everyone",
-          assignedMemberIds: MOCK_MEMBERS.map((m) => m.id),
-        },
-      ];
-
-      const balances = calculateBalances(
-        items,
-        assignments,
-        0,
-        0,
-        300, // $3 discount
-      );
-
-      // Each person owes $10/3 - $3/3 = $7/3 ≈ $2.33
-      const totalOwed = balances.reduce((sum, b) => sum + b.amount, 0);
-      expect(totalOwed).toBeLessThan(1000); // Less than the original item cost
+      // bob: $10 + $7 = $17
+      // charlie: $7
+      const bob = balances.find((b) => b.fromMemberId === "bob");
+      const charlie = balances.find((b) => b.fromMemberId === "charlie");
+      expect(bob!.amount).toBeGreaterThan(charlie!.amount);
     });
   });
 });

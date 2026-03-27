@@ -1,32 +1,28 @@
-import type { Balance, Expense, MemberId } from "../../../domain/types";
+import type { Balance, Expense, Member } from "@divvy-up/core";
 
 /**
- * Derives per-member balances from a finalized expense.
+ * Client-side balance preview that mirrors the backend `computeBalances`
+ * algorithm exactly. Used to show a live balance estimate during receipt
+ * review before the expense is finalized.
  *
- * Each member owes their share of each item back to the payer.
- * Adjustments (tax, tip, discount) are distributed proportionally: each
- * member's share of any adjustment equals their fraction of the item subtotal.
- *
- * @param expense   The expense to compute balances from.
- * @param memberIds Full member list of the group, used to resolve
- *                  `type: "everyone"` assignments. Pass `[]` if unknown;
- *                  "everyone" items will be skipped.
+ * Keep this in sync with:
+ *   microservices/core/src/application/expenses/finalize/computeBalances.ts
  */
-export function computeBalances(
+export function computeBalancesPreview(
   expense: Expense,
-  memberIds: MemberId[],
-): Balance[] {
-  // itemShareAll tracks every member's item cost (including payer) so that
-  // adjustment proportions are based on the full receipt subtotal, not just
-  // the portion owed by non-payer members.
-  const itemShareAll = new Map<MemberId, number>();
-  const owedByMember = new Map<MemberId, number>();
+  members: Member[],
+): Omit<Balance, "groupId">[] {
+  const memberIds = members.map((m) => m.id);
+  // Track every member's item cost (including payer) for fair adjustment
+  // distribution — mirrors the backend computeBalances approach.
+  const itemShareAll = new Map<string, number>();
+  const owedByMember = new Map<string, number>();
 
   for (const item of expense.items) {
     const itemTotal = item.unitPrice * item.quantity;
     const { assignment } = item;
 
-    let shares: { memberId: MemberId; fraction: number }[];
+    let shares: { memberId: string; fraction: number }[];
 
     if (assignment.type === "one") {
       shares = [{ memberId: assignment.memberId, fraction: 1 }];
@@ -39,7 +35,7 @@ export function computeBalances(
       }));
     } else if (assignment.type === "everyone") {
       const count = memberIds.length;
-      if (count === 0) continue; // can't resolve without member list
+      if (count === 0) continue;
       shares = memberIds.map((id) => ({ memberId: id, fraction: 1 / count }));
     } else {
       // custom
@@ -52,14 +48,12 @@ export function computeBalances(
     for (const { memberId, fraction } of shares) {
       const share = Math.round(itemTotal * fraction);
       itemShareAll.set(memberId, (itemShareAll.get(memberId) ?? 0) + share);
-      if (memberId === expense.payerId) continue; // payer doesn't owe themselves
+      if (memberId === expense.payerId) continue;
       owedByMember.set(memberId, (owedByMember.get(memberId) ?? 0) + share);
     }
   }
 
-  // Distribute adjustments (tax / tip / discount) proportionally.
-  // Use each member's fraction of the *full* item subtotal (including payer)
-  // so that discount benefits are shared fairly across all diners.
+  // Distribute adjustments proportionally — mirrors backend behaviour.
   if (expense.adjustments.length > 0) {
     const totalAllShares = [...itemShareAll.values()].reduce(
       (a, b) => a + b,
@@ -85,7 +79,6 @@ export function computeBalances(
   return [...owedByMember.entries()]
     .filter(([, amount]) => amount > 0)
     .map(([fromMemberId, amount]) => ({
-      groupId: expense.groupId,
       fromMemberId,
       toMemberId: expense.payerId,
       amount,

@@ -7,11 +7,13 @@ import { groupsListHandler } from "./application/groups/list/groupsListHandler";
 import { expensesCreateHandler } from "./application/expenses/create/expensesCreateHandler";
 import { expensesItemAssignmentHandler } from "./application/expenses/items/assignment/expensesItemAssignmentHandler";
 import { expensesFinalizeHandler } from "./application/expenses/finalize/expensesFinalizeHandler";
+import { expensesGetHandler } from "./application/expenses/get/expensesGetHandler";
 
 const app = new Elysia()
   .use(openapi())
   .use(groupsListHandler)
   .use(expensesCreateHandler)
+  .use(expensesGetHandler)
   .use(expensesItemAssignmentHandler)
   .use(expensesFinalizeHandler);
 
