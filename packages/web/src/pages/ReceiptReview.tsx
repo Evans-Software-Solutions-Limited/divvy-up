@@ -90,6 +90,7 @@ export function ReceiptReview() {
   const finalizeMutation = useMutation({
     mutationFn: async () => {
       if (!expenseId) throw new Error("No expense id");
+      if (members.length === 0) throw new Error("No members");
       const res = await api.core
         .expenses({ id: expenseId })
         .finalize.post({ memberIds: members.map((m) => m.id) });
@@ -188,6 +189,8 @@ export function ReceiptReview() {
 
   const memberName = (id: string) =>
     members.find((m) => m.id === id)?.name ?? id;
+
+  const canFinalize = members.length > 0 && expense.status !== "finalized";
 
   return (
     <div className="space-y-6 p-6 max-w-4xl mx-auto">
@@ -435,7 +438,7 @@ export function ReceiptReview() {
           <Button
             onClick={() => setShowFinalize(true)}
             className="flex-1 bg-green-600 hover:bg-green-700"
-            disabled={finalizeMutation.isPending}
+            disabled={!canFinalize || finalizeMutation.isPending}
           >
             {finalizeMutation.isPending ? "Finalizing…" : "Finalize Expense"}
           </Button>
@@ -469,6 +472,7 @@ export function ReceiptReview() {
             <AlertDialogAction
               onClick={() => finalizeMutation.mutate()}
               className="bg-green-600"
+              disabled={!canFinalize || finalizeMutation.isPending}
             >
               Confirm
             </AlertDialogAction>
