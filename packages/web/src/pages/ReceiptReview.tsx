@@ -189,6 +189,10 @@ export function ReceiptReview() {
   const memberName = (id: string) =>
     members.find((m) => m.id === id)?.name ?? id;
 
+  // Finalization requires member context — without it, `type:'everyone'` items
+  // would be skipped and `memberIds: []` would produce incorrect balances.
+  const canFinalize = members.length > 0;
+
   return (
     <div className="space-y-6 p-6 max-w-4xl mx-auto">
       {/* Receipt Header */}
@@ -207,8 +211,8 @@ export function ReceiptReview() {
 
       {members.length === 0 && (
         <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-          No group members available — balance preview is disabled. Pass members
-          via navigation state to enable splitting.
+          No group members available — balance preview and finalization are
+          disabled. Navigate here from the group screen to enable splitting.
         </div>
       )}
 
@@ -435,7 +439,7 @@ export function ReceiptReview() {
           <Button
             onClick={() => setShowFinalize(true)}
             className="flex-1 bg-green-600 hover:bg-green-700"
-            disabled={finalizeMutation.isPending}
+            disabled={!canFinalize || finalizeMutation.isPending}
           >
             {finalizeMutation.isPending ? "Finalizing…" : "Finalize Expense"}
           </Button>
@@ -469,6 +473,7 @@ export function ReceiptReview() {
             <AlertDialogAction
               onClick={() => finalizeMutation.mutate()}
               className="bg-green-600"
+              disabled={!canFinalize || finalizeMutation.isPending}
             >
               Confirm
             </AlertDialogAction>

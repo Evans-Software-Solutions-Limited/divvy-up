@@ -35,6 +35,30 @@ function makeExpense(
 }
 
 describe("computeBalancesPreview", () => {
+  describe("empty members guard", () => {
+    it("returns empty array when members list is empty", () => {
+      // This mirrors the ReceiptReview canFinalize guard: calling with no
+      // members would skip type:'everyone' items and send memberIds:[] to
+      // finalize, producing incorrect balances.
+      const expense = makeExpense({
+        items: [
+          {
+            id: "item-1",
+            expenseId: "exp-1",
+            description: "Shared item",
+            unitPrice: 3000,
+            quantity: 1,
+            assignment: { type: "everyone" },
+          },
+        ],
+      });
+
+      const balances = computeBalancesPreview(expense, []);
+
+      expect(balances).toHaveLength(0);
+    });
+  });
+
   describe("one person assignment", () => {
     it("assigns entire item cost to one person", () => {
       const expense = makeExpense({
