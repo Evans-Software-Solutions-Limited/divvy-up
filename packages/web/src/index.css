@@ -150,14 +150,11 @@
 @layer base {
   * {
     @apply border-border outline-ring/50;
-    @apply border-border outline-ring/50;
   }
   body {
     @apply font-sans bg-background text-foreground;
-    @apply font-sans bg-background text-foreground;
   }
   html {
-    @apply font-sans;
     @apply font-sans;
   }
 }
