@@ -1,5 +1,11 @@
 import { useState, useMemo } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Card,
+  CardContent,
+  CardHeader,
+  CardTitle,
+  CardDescription,
+} from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import {
   Select,
@@ -10,6 +16,8 @@ import {
 } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Badge } from "@/components/ui/badge";
+import { Separator } from "@/components/ui/separator";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -18,6 +26,11 @@ import {
   AlertDialogDescription,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  IconArrowRight,
+  IconCalendar,
+  IconCurrencyDollar,
+} from "@tabler/icons-react";
 
 /**
  * Mock receipt data for demonstration
@@ -211,45 +224,61 @@ export function ReceiptReview({ onFinalize }: ReceiptReviewProps) {
   };
 
   return (
-    <div className="space-y-6 p-6 max-w-4xl mx-auto">
+    <div className="mx-auto max-w-lg space-y-4 px-4 pt-6 pb-4">
       {/* Receipt Header */}
-      <Card>
+      <Card size="sm">
         <CardHeader>
-          <CardTitle>{MOCK_RECEIPT.merchant || "Receipt"}</CardTitle>
-          <div className="text-sm text-gray-600 space-y-1">
-            <p>Date: {MOCK_RECEIPT.date}</p>
-            <p>Currency: {MOCK_RECEIPT.currency}</p>
-          </div>
+          <CardTitle className="text-lg">
+            {MOCK_RECEIPT.merchant || "Receipt"}
+          </CardTitle>
+          <CardDescription className="flex items-center gap-3">
+            <span className="inline-flex items-center gap-1">
+              <IconCalendar className="size-3.5" />
+              {MOCK_RECEIPT.date}
+            </span>
+            <span className="inline-flex items-center gap-1">
+              <IconCurrencyDollar className="size-3.5" />
+              {MOCK_RECEIPT.currency}
+            </span>
+          </CardDescription>
         </CardHeader>
       </Card>
 
       {/* Items Section */}
       <Card>
         <CardHeader>
-          <CardTitle className="text-lg">Line Items</CardTitle>
+          <CardTitle>Line Items</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
+        <CardContent className="space-y-3">
           {MOCK_RECEIPT.items.map((item) => {
             const assignment = getItemAssignment(item.id);
             const itemTotal = item.unitPrice * item.quantity;
 
             return (
-              <div key={item.id} className="border rounded-lg p-4 space-y-3">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <p className="font-medium">{item.description}</p>
-                    <p className="text-sm text-gray-600">
-                      {item.quantity} × {formatCurrency(item.unitPrice)} ={" "}
-                      {formatCurrency(itemTotal)}
+              <div
+                key={item.id}
+                className="space-y-3 rounded-xl border border-border bg-muted/20 p-3"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="font-medium leading-snug">
+                      {item.description}
+                    </p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">
+                      {item.quantity} &times; {formatCurrency(item.unitPrice)}
                     </p>
                   </div>
-                  <p className="font-semibold">{formatCurrency(itemTotal)}</p>
+                  <Badge variant="secondary" className="shrink-0 tabular-nums">
+                    {formatCurrency(itemTotal)}
+                  </Badge>
                 </div>
 
                 {assignment && (
                   <div className="space-y-2">
-                    <div className="text-sm">
-                      <Label className="text-gray-700">Split Mode</Label>
+                    <div>
+                      <Label className="text-xs text-muted-foreground">
+                        Split mode
+                      </Label>
                       <Select
                         value={assignment.mode}
                         onValueChange={(mode) =>
@@ -260,7 +289,7 @@ export function ReceiptReview({ onFinalize }: ReceiptReviewProps) {
                           )
                         }
                       >
-                        <SelectTrigger className="mt-1">
+                        <SelectTrigger className="mt-1 w-full">
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
@@ -274,14 +303,16 @@ export function ReceiptReview({ onFinalize }: ReceiptReviewProps) {
 
                     {assignment.mode === "one" && (
                       <div>
-                        <Label className="text-sm">Assign to</Label>
+                        <Label className="text-xs text-muted-foreground">
+                          Assign to
+                        </Label>
                         <Select
                           value={assignment.assignedMemberIds[0] || ""}
                           onValueChange={(memberId) =>
                             handleAssignmentChange(item.id, "one", [memberId])
                           }
                         >
-                          <SelectTrigger className="mt-1">
+                          <SelectTrigger className="mt-1 w-full">
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
@@ -296,43 +327,48 @@ export function ReceiptReview({ onFinalize }: ReceiptReviewProps) {
                     )}
 
                     {assignment.mode === "equal" && (
-                      <div className="space-y-2">
-                        <Label className="text-sm">Split among</Label>
-                        <div className="space-y-1">
-                          {MOCK_MEMBERS.map((member) => (
-                            <label
-                              key={member.id}
-                              className="flex items-center space-x-2"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={assignment.assignedMemberIds.includes(
-                                  member.id,
-                                )}
-                                onChange={(e) => {
-                                  const newIds = e.target.checked
-                                    ? [
+                      <div className="space-y-1.5">
+                        <Label className="text-xs text-muted-foreground">
+                          Split among
+                        </Label>
+                        <div className="flex flex-wrap gap-2">
+                          {MOCK_MEMBERS.map((member) => {
+                            const isSelected =
+                              assignment.assignedMemberIds.includes(member.id);
+                            return (
+                              <button
+                                key={member.id}
+                                type="button"
+                                onClick={() => {
+                                  const newIds = isSelected
+                                    ? assignment.assignedMemberIds.filter(
+                                        (id) => id !== member.id,
+                                      )
+                                    : [
                                         ...assignment.assignedMemberIds,
                                         member.id,
-                                      ]
-                                    : assignment.assignedMemberIds.filter(
-                                        (id) => id !== member.id,
-                                      );
+                                      ];
                                   handleAssignmentChange(
                                     item.id,
                                     "equal",
                                     newIds,
                                   );
                                 }}
-                              />
-                              <span className="text-sm">{member.name}</span>
-                            </label>
-                          ))}
+                                className={`rounded-4xl border px-3 py-1 text-xs font-medium transition-colors ${
+                                  isSelected
+                                    ? "border-primary bg-primary/10 text-primary"
+                                    : "border-border bg-background text-muted-foreground hover:border-foreground/20"
+                                }`}
+                              >
+                                {member.name}
+                              </button>
+                            );
+                          })}
                         </div>
                       </div>
                     )}
 
-                    <div className="text-xs text-gray-600 mt-2">
+                    <p className="text-[0.7rem] text-muted-foreground">
                       {assignment.mode === "everyone" &&
                         "Split evenly among all members"}
                       {assignment.mode === "one" &&
@@ -341,7 +377,7 @@ export function ReceiptReview({ onFinalize }: ReceiptReviewProps) {
                         `Split among ${assignment.assignedMemberIds.length} member(s)`}
                       {assignment.mode === "custom" &&
                         "Custom shares configured"}
-                    </div>
+                    </p>
                   </div>
                 )}
               </div>
@@ -351,14 +387,14 @@ export function ReceiptReview({ onFinalize }: ReceiptReviewProps) {
       </Card>
 
       {/* Adjustments Section */}
-      <Card>
+      <Card size="sm">
         <CardHeader>
-          <CardTitle className="text-lg">Adjustments</CardTitle>
+          <CardTitle>Adjustments</CardTitle>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-3 gap-4">
+        <CardContent>
+          <div className="grid grid-cols-3 gap-3">
             <div>
-              <Label className="text-sm">Tax</Label>
+              <Label className="text-xs text-muted-foreground">Tax</Label>
               <Input
                 type="number"
                 value={tax / 100}
@@ -369,7 +405,7 @@ export function ReceiptReview({ onFinalize }: ReceiptReviewProps) {
               />
             </div>
             <div>
-              <Label className="text-sm">Tip</Label>
+              <Label className="text-xs text-muted-foreground">Tip</Label>
               <Input
                 type="number"
                 value={tip / 100}
@@ -380,7 +416,7 @@ export function ReceiptReview({ onFinalize }: ReceiptReviewProps) {
               />
             </div>
             <div>
-              <Label className="text-sm">Discount</Label>
+              <Label className="text-xs text-muted-foreground">Discount</Label>
               <Input
                 type="number"
                 value={discount / 100}
@@ -395,13 +431,13 @@ export function ReceiptReview({ onFinalize }: ReceiptReviewProps) {
       </Card>
 
       {/* Balances Summary */}
-      <Card className="bg-blue-50 border-blue-200">
+      <Card className="border-primary/20 bg-primary/5" size="sm">
         <CardHeader>
-          <CardTitle className="text-lg">Who Owes What</CardTitle>
+          <CardTitle>Who Owes What</CardTitle>
         </CardHeader>
         <CardContent>
           {balances.length === 0 ? (
-            <p className="text-gray-600 text-sm">
+            <p className="text-sm text-muted-foreground">
               Everyone is even (or no assignments yet)
             </p>
           ) : (
@@ -414,11 +450,16 @@ export function ReceiptReview({ onFinalize }: ReceiptReviewProps) {
                   (m) => m.id === balance.toMemberId,
                 )?.name;
                 return (
-                  <div key={i} className="flex justify-between text-sm">
-                    <span>
-                      <strong>{fromName}</strong> owes <strong>{toName}</strong>
+                  <div
+                    key={i}
+                    className="flex items-center justify-between text-sm"
+                  >
+                    <span className="flex items-center gap-1.5">
+                      <span className="font-medium">{fromName}</span>
+                      <IconArrowRight className="size-3.5 text-muted-foreground" />
+                      <span className="font-medium">{toName}</span>
                     </span>
-                    <span className="font-semibold">
+                    <span className="tabular-nums font-semibold">
                       {formatCurrency(balance.amount)}
                     </span>
                   </div>
@@ -430,28 +471,33 @@ export function ReceiptReview({ onFinalize }: ReceiptReviewProps) {
       </Card>
 
       {/* Totals Footer */}
-      <Card>
-        <CardContent className="pt-6">
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span>Subtotal:</span>
-              <span>{formatCurrency(MOCK_RECEIPT.subtotal)}</span>
+      <Card size="sm">
+        <CardContent>
+          <div className="space-y-1.5 text-sm">
+            <div className="flex justify-between text-muted-foreground">
+              <span>Subtotal</span>
+              <span className="tabular-nums">
+                {formatCurrency(MOCK_RECEIPT.subtotal)}
+              </span>
             </div>
-            <div className="flex justify-between">
-              <span>Tax:</span>
-              <span>{formatCurrency(tax)}</span>
+            <div className="flex justify-between text-muted-foreground">
+              <span>Tax</span>
+              <span className="tabular-nums">{formatCurrency(tax)}</span>
             </div>
-            <div className="flex justify-between">
-              <span>Tip:</span>
-              <span>{formatCurrency(tip)}</span>
+            <div className="flex justify-between text-muted-foreground">
+              <span>Tip</span>
+              <span className="tabular-nums">{formatCurrency(tip)}</span>
             </div>
-            <div className="flex justify-between">
-              <span>Discount:</span>
-              <span>-{formatCurrency(discount)}</span>
+            <div className="flex justify-between text-muted-foreground">
+              <span>Discount</span>
+              <span className="tabular-nums">
+                &minus;{formatCurrency(discount)}
+              </span>
             </div>
-            <div className="border-t pt-2 flex justify-between font-semibold text-base">
-              <span>Total:</span>
-              <span>
+            <Separator className="my-2" />
+            <div className="flex justify-between text-base font-semibold">
+              <span>Total</span>
+              <span className="tabular-nums">
                 {formatCurrency(MOCK_RECEIPT.subtotal + tax + tip - discount)}
               </span>
             </div>
@@ -464,10 +510,7 @@ export function ReceiptReview({ onFinalize }: ReceiptReviewProps) {
         <Button variant="outline" className="flex-1">
           Cancel
         </Button>
-        <Button
-          onClick={() => setShowFinalize(true)}
-          className="flex-1 bg-green-600 hover:bg-green-700"
-        >
+        <Button onClick={() => setShowFinalize(true)} className="flex-1">
           Finalize Expense
         </Button>
       </div>
@@ -476,7 +519,7 @@ export function ReceiptReview({ onFinalize }: ReceiptReviewProps) {
       <AlertDialog open={showFinalize} onOpenChange={setShowFinalize}>
         <AlertDialogContent>
           <AlertDialogTitle>Finalize Expense?</AlertDialogTitle>
-          <AlertDialogDescription>
+          <AlertDialogDescription asChild>
             <div className="space-y-2">
               <p>Review the balances below and confirm:</p>
               {balances.map((balance, i) => {
@@ -488,7 +531,8 @@ export function ReceiptReview({ onFinalize }: ReceiptReviewProps) {
                 )?.name;
                 return (
                   <p key={i}>
-                    <strong>{fromName}</strong> → <strong>{toName}</strong>:{" "}
+                    <span className="font-medium">{fromName}</span> &rarr;{" "}
+                    <span className="font-medium">{toName}</span>:{" "}
                     {formatCurrency(balance.amount)}
                   </p>
                 );
@@ -497,10 +541,7 @@ export function ReceiptReview({ onFinalize }: ReceiptReviewProps) {
           </AlertDialogDescription>
           <div className="flex gap-2">
             <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleFinalize}
-              className="bg-green-600"
-            >
+            <AlertDialogAction onClick={handleFinalize}>
               Confirm
             </AlertDialogAction>
           </div>
