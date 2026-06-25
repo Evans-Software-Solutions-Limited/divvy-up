@@ -91,9 +91,10 @@
       against `packages/db` `activity` table: `append`, `listByUser` (all groups), `listByGroup`,
       newest-first. _Requirements: 5.2, 5.3, 5.4_
 
-- [ ] 19. Emit activity entries at the source events: `expense_added` on finalize,
-      `member_joined` on join (hook into the existing finalize and groups/members flows), and
-      `settlement` from the settlements service (task 15). _Requirements: 5.1, 5.5_
+- [ ] 19. Emit activity entries at the source events using the canonical `activity_kind` enum:
+      `expense_finalized` on finalize, `member_added` on join (hook into the existing finalize and
+      groups/members flows), and `settled_up` from the settlements service (task 15).
+      _Requirements: 5.1, 5.5_
 
 - [ ] 20. Add `activityHandler`: `GET /activity` (user's groups) and
       `GET /groups/:groupId/activity`, both scoped to the verified user. _Requirements: 5.3, 5.4,

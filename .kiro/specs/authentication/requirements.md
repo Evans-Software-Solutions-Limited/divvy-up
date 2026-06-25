@@ -213,13 +213,13 @@ first use, so that I can immediately create groups and expenses scoped to me.
 #### Acceptance Criteria
 
 1. WHEN an authenticated request arrives and no `users` row exists for the verified `sub` THE
-   SYSTEM SHALL create a `users` row linking the Supabase `sub` to a Divvy Up user (capturing
-   `email` and, where available, display name).
+   SYSTEM SHALL create a `users` row with `id = sub` (capturing `email` and, where available, a
+   display name derived from `email` / `user_metadata`).
 2. WHEN a `users` row already exists for the `sub` THE SYSTEM SHALL reuse it and SHALL NOT
    create a duplicate.
 3. THE SYSTEM SHALL make provisioning idempotent and safe under concurrent first requests
-   (upsert / `ON CONFLICT (supabase_sub) DO NOTHING` keyed on the unique `sub`).
-4. WHEN provisioning resolves THE SYSTEM SHALL make the internal Divvy Up `userId` available to
+   (upsert / `ON CONFLICT (id) DO NOTHING` keyed on `id = sub`).
+4. WHEN provisioning resolves THE SYSTEM SHALL make `userId` (== the Supabase `sub`) available to
    handlers as the value all subsequent queries scope to.
 5. IF provisioning fails (database error) THEN THE SYSTEM SHALL surface a `500` via the global
    error handler and SHALL NOT proceed with the handler's business logic.

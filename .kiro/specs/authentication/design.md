@@ -53,8 +53,8 @@ sequenceDiagram
     alt token missing/invalid
         MW-->>C: 401 { message: "Unauthorized" }
     else verified
-        MW->>DB: upsert users row by supabase_sub (ON CONFLICT DO NOTHING) → userId
-        DB-->>MW: internal userId
+        MW->>DB: upsert users row with id = sub (ON CONFLICT (id) DO NOTHING) → userId
+        DB-->>MW: userId (== sub)
         MW->>H: ctx.user (claims) + ctx.userId
         H-->>C: 200 result (queries scoped to userId)
     end
@@ -164,7 +164,10 @@ export function getUser(ctx: { user: SupabaseUser | null }): SupabaseUser;
 
 - **User provisioning** — `packages/api-utils/src/auth/provisionUser.ts`:
   `provisionUser(claims: SupabaseUser): Promise<{ userId: string }>` upserts into `packages/db`
-  `users` by the unique `supabase_sub`, returns the internal Divvy Up id. Idempotent.
+  `users` using `claims.sub` as the primary-key `id` (Divvy Up `users.id` **is** the Supabase
+  user id — see `data-and-persistence`). `displayName` is derived from `email` (or
+  `user_metadata.name` when present) since base claims carry no name. Returns `claims.sub` as the
+  `userId`. Idempotent.
 - **Wiring helper** — exported `withAuth(app: Elysia)` (or applied inline) that does
   `.derive(async ({ headers }) => { const user = await getAuthUser(headers.authorization);
 const userId = user ? (await provisionUser(user)).userId : null; return { user, userId }; })`
@@ -193,16 +196,16 @@ environment per `steering/tech.md` (secrets never in git).
 
 **`users` provisioning** (owned by `data-and-persistence`; this spec depends on / writes it):
 
-| Column         | Type          | Notes                                                    |
-| -------------- | ------------- | -------------------------------------------------------- |
-| `id`           | uuid (pk)     | Internal Divvy Up `userId` — what all queries scope to   |
-| `supabase_sub` | text (unique) | Links to JWT `sub`; the idempotency key for provisioning |
-| `email`        | text          | From claims                                              |
-| `display_name` | text \| null  | From claims / metadata when available                    |
-| `created_at`   | timestamptz   | Defaults to now                                          |
+| Column         | Type         | Notes                                                                          |
+| -------------- | ------------ | ------------------------------------------------------------------------------ |
+| `id`           | uuid (pk)    | **Equals** the Supabase user id (JWT `sub`); the `userId` all queries scope to |
+| `email`        | text         | From claims                                                                    |
+| `display_name` | text \| null | Nullable; derived from `email` / `user_metadata.name` when available           |
+| `created_at`   | timestamptz  | Defaults to now                                                                |
 
-Provisioning is `INSERT … ON CONFLICT (supabase_sub) DO NOTHING RETURNING id` (then select if
-the conflict path returns no row) — safe under concurrent first requests.
+There is **no separate `supabase_sub` column** — `id == sub`, so `userId === claims.sub` with no
+indirection. Provisioning is `INSERT … ON CONFLICT (id) DO NOTHING` keyed on `id = claims.sub`,
+safe under concurrent first requests.
 
 ## API Contract
 

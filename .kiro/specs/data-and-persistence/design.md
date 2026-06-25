@@ -211,9 +211,10 @@ import { sql, relations } from "drizzle-orm";
 
 // ── users ── (id == Supabase Auth user id)
 export const users = pgTable("users", {
-  id: uuid("id").primaryKey(), // mirrors auth.users.id
+  id: uuid("id").primaryKey(), // == Supabase auth.users.id (the JWT `sub`); no separate column
   email: text("email").notNull().unique(),
-  displayName: text("display_name").notNull(),
+  // nullable: base JWT claims carry no name; provisioning derives from email / user_metadata
+  displayName: text("display_name"),
   createdAt: timestamp("created_at", { withTimezone: true })
     .notNull()
     .defaultNow(),

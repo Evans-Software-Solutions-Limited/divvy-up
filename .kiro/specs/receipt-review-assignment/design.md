@@ -149,7 +149,7 @@ Body: `{ assignment: ItemAssignment }`
 
 **2. Update adjustments** _(new)_
 `PUT /expenses/:id/adjustments`
-Body: `{ adjustments: { kind: "tax"|"tip"|"discount"; amount: number /*pence*/; isPercent: boolean }[] }`
+Body: `{ adjustments: { kind: "tax"|"tip"|"discount"; amount: number /* bps if isPercent (1250 = 12.50%), else pence; discount negative */; isPercent: boolean }[] }`
 → `200 Expense` · `403` · `404` · `409` (finalized).
 
 **3. Finalize**

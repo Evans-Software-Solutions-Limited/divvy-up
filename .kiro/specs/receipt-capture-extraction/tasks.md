@@ -10,7 +10,8 @@
 - [ ] **1. Define the Extraction Contract types**
       Rewrite `microservices/other-service/src/types/receipt.ts` to the GBP/pence contract from
       `design.md`: `ExtractedItem` (with `confidence` + `flagReason`, integer `*Minor`),
-      `ExtractedAdjustment` (signed `amountMinor`, `kind`), `ExtractionResult` (`outcome:"extracted"`,
+      `ExtractedAdjustment` (`kind` ∈ tax|tip|discount, `isPercent`, signed `amount` = bps|pence),
+      `ExtractionResult` (`outcome:"extracted"`,
       `draftExpenseId`, `reconciled`, `partial`, `overallConfidence`), `UnreadableResult`, and the
       `ExtractResponse` union. Export them so the mock client and eden client share one source of
       truth. No assignment field on items.
@@ -110,10 +111,11 @@
 ## Phase 4 — Persist the draft (backend)
 
 - [ ] **14. DraftExpenseRepository (packages/db)**
-      Add the draft-from-extraction write path: insert a `draft` `Expense`
-      (`status='draft'`, `currency='GBP'`, merchant + pence totals + `receipt_image_key`,
-      `payer_id` = authed user) plus `receipt_items` (with `confidence`/`flag_reason`, **no
-      assignment**) and `receipt_adjustments`, **in one transaction**, scoped to user + group. Tests:
+      Add the draft-from-extraction write path: insert a `draft` `expenses` row
+      (`status='draft'`, `currency='GBP'`, `merchant`, `receipt_image_key`,
+      `payer_member_id` = the creator's group membership) plus `receipt_items` (with
+      `confidence`/`flag`/`sort_order`, **no assignment**) and `receipt_adjustments`
+      (`kind`/`is_percent`/`amount`/`label`), **in one transaction**, scoped to user + group. Tests:
       rows land, items unassigned, signed discounts, transaction rolls back fully on failure.
       _Requirements: 7.1, 7.2, 7.3, 7.4, 7.6, 7.7_
 

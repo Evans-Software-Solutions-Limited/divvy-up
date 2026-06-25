@@ -118,10 +118,12 @@ Tables are **defined by the `data-and-persistence` spec** (Drizzle schema in `pa
 this feature **references** them and does not redefine them. Relevant tables:
 
 - **`settlements`** — `id`, `groupId` (fk), `fromMemberId` (fk), `toMemberId` (fk),
-  `amount` (integer pence, > 0), `currency` (default `GBP`), `createdAt`, `createdByUserId`.
-- **`activity`** — `id`, `groupId` (fk), `type` (`expense_added` | `settlement` |
-  `member_joined`), `actorMemberId` (fk), `amount` (nullable integer pence),
-  `expenseId` / `settlementId` (nullable fk), `createdAt`.
+  `amount` (integer pence, > 0), `recordedBy` (fk → `users.id`), `createdAt`. (Currency is the
+  group's; not a settlements column.)
+- **`activity`** — `id`, `groupId` (fk), `kind` (`expense_added` | `expense_finalized` |
+  `settled_up` | `member_added`), `actorMemberId` (fk), `amount` (nullable integer pence),
+  `expenseId` / `settlementId` (nullable fk), `createdAt`. (Field is `kind`, not `type`; settlement
+  rows use `settled_up`, member joins use `member_added` — per the canonical `activity_kind` enum.)
 
 Balances are **not** a table — they are derived from `expenses` (status `finalized`),
 `expense_items`/assignments, `adjustments`, and `settlements`. The directed-net shape reuses
@@ -176,7 +178,7 @@ type Settlement = {
 // GET /groups/:groupId/activity   (one group)
 type ActivityEntry = {
   id: string;
-  type: "expense_added" | "settlement" | "member_joined";
+  kind: "expense_added" | "expense_finalized" | "settled_up" | "member_added";
   groupId: string;
   groupName: string; // denormalized for Home rendering
   actorMemberId: string;

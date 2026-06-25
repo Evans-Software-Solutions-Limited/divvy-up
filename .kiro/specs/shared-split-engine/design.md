@@ -121,7 +121,9 @@ export function balancesFromExpense(
 
 - `items`: `{ id, price: unitPrice, qty: quantity, assign, conf? }` where `assign` maps the domain
   `ItemAssignment` to the engine `Assignment` (see Data Models).
-- `adjustments`: `{ kind, mode: isPercent ? "percent" : "fixed", value: amount }`.
+- `adjustments`: `{ kind, mode: isPercent ? "percent" : "fixed", value: amount }`. `amount` is the
+  schema value verbatim — **basis points when `isPercent`** (e.g. `1250`), pence otherwise; no
+  conversion (the engine consumes bps directly).
 - `memberIds`: passed through, used both for `everyone` resolution and as the canonical member set.
 
 Then it runs `computeSplit`, drops the payer, and emits `Balance` rows for non-payers whose
@@ -157,7 +159,7 @@ export type AdjustmentMode = "fixed" | "percent";
 export interface Adjustment {
   kind: AdjustmentKind;
   mode: AdjustmentMode;
-  value: number; // pence (fixed) or 0..100 (percent)
+  value: number; // fixed → pence; percent → basis points (1250 = 12.50%). discounts negative.
 }
 
 export interface SplitResult {
@@ -196,6 +198,11 @@ Mapping table used by `balancesFromExpense`:
 | ------------------------------------ | ------------------------------------------ |
 | `{ kind, amount, isPercent: true }`  | `{ kind, mode: "percent", value: amount }` |
 | `{ kind, amount, isPercent: false }` | `{ kind, mode: "fixed", value: amount }`   |
+
+`amount` is passed through **unchanged** — it is basis points when `isPercent` (schema stores
+`1250` for 12.50%) and pence otherwise. The engine never rescales it; see the percent formula
+below (`× bps / 10000`). This keeps a single integer unit end-to-end (schema → wire → engine) and
+removes any ×100 conversion step.
 
 ## Algorithm
 
@@ -237,8 +244,9 @@ A weighted custom example — split **1000p** by `2 : 1` (`weights = [2,1]`):
 After all items are distributed into `perPerson`:
 
 1. For each adjustment, resolve its signed pence amount:
-   - `percent`: `amt = Math.round(itemsSubtotal * value / 100)` — **on the items subtotal**.
-   - `fixed`: `amt = value`.
+   - `percent`: `amt = Math.round(itemsSubtotal * value / 10000)` — `value` is **basis points**, so
+     `/ 10000` (not `/ 100`); computed **on the items subtotal**.
+   - `fixed`: `amt = value` — already pence.
    - `discount` kind: `amt = -Math.abs(amt)`.
    - accumulate into `adjustmentsTotal`.
 2. Build the pro-rata weight vector: the members who currently hold a positive share, weighted by
@@ -249,9 +257,9 @@ After all items are distributed into `perPerson`:
 #### Worked pence example — pro-rata service charge
 
 Receipt: A's items = 600p, B's items = 400p (`itemsSubtotal = 1000`, fully assigned). Add a
-**12.5% service charge** (`percent`, value 12.5):
+**12.5% service charge** (`percent`, value `1250` basis points — as stored in the schema):
 
-- `amt = round(1000 * 12.5 / 100) = round(125) = 125p`.
+- `amt = round(1000 * 1250 / 10000) = round(125) = 125p`.
 - Weights = current shares `[600, 400]` (A, B).
 - `splitPence(125, [600, 400])`: `raw = [75, 50]`, `floor = [75, 50]`, `rem = 0` → `[75, 50]`.
 - `adjByPerson = { A: 75, B: 50 }`, `adjustmentsTotal = 125`.

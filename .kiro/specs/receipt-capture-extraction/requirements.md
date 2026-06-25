@@ -161,10 +161,11 @@ merchant cannot be read THEN THE SYSTEM SHALL return `merchant: null` rather tha
 name.
 
 5.5. WHEN extraction detects receipt-level adjustments (service charge, tip, tax, discount) THE
-SYSTEM SHALL return an `adjustments` array, each with `kind`
-(`service` | `tip` | `tax` | `discount`), a human `label`, an `amountMinor` (integer pence;
-**negative for discounts**), and a `confidence` (`0..1`); detected percentage charges SHALL be
-resolved to an integer-pence `amountMinor`.
+SYSTEM SHALL return an `adjustments` array, each with `kind` (`tax` | `tip` | `discount` — a
+printed service charge is normalised to `tip` with the wording kept in `label`), a human `label`,
+an `isPercent` boolean, and an `amount` (**basis points when `isPercent`**, e.g. `1250` for
+12.50%; otherwise integer pence; **negative for discounts**). Percentage charges SHALL be
+**preserved** as `isPercent: true` + basis points, not resolved to pence.
 
 5.6. THE SYSTEM SHALL return receipt totals as integer pence: `subtotalMinor` (sum of line
 totals before adjustments), `adjustmentsTotalMinor`, and `totalMinor` as printed.
@@ -216,12 +217,13 @@ that a dropped connection or app switch doesn't lose my work.
 draft `Expense` (`status = 'draft'`) linked to the `groupId` and the authenticated payer, with
 `currency = 'GBP'` and the detected `merchant` and totals in pence.
 
-7.2. THE SYSTEM SHALL persist each extracted line item as a receipt-item row carrying its
-`description`, `quantity`, `unitPriceMinor`, `lineTotalMinor`, `confidence`, and `flagReason`,
-with **no assignment** set (assignment is feature #7).
+7.2. THE SYSTEM SHALL persist each extracted line item as a `receipt_items` row carrying its
+`description`, `quantity`, `unit_price` (pence), `confidence`, `flag`, and `sort_order`, with
+**no assignment** set (assignment is feature #7 and lives in `item_assignments`). `line_total` is
+not stored — it is `unit_price * quantity`.
 
-7.3. THE SYSTEM SHALL persist each detected adjustment row (`kind`, `label`, `amountMinor`,
-`confidence`).
+7.3. THE SYSTEM SHALL persist each detected adjustment as a `receipt_adjustments` row
+(`kind`, `is_percent`, `amount`, `label`) — no per-adjustment confidence column.
 
 7.4. THE SYSTEM SHALL store the `receipt_image_key` on the draft expense so feature #7 can render
 the "how AI read your receipt" overlay from the same S3 object.

@@ -123,7 +123,10 @@ All money is **integer pence**. Field names carry `Minor` to make that unmissabl
 
 export type Currency = "GBP"; // V1 fixed; field retained for future multi-currency
 
-export type AdjustmentKind = "service" | "tip" | "tax" | "discount";
+// Canonical `adjustment_kind` enum (data-and-persistence): no `service` variant.
+// A printed "service charge" is normalised to `tip` at extraction, with the wording preserved
+// in `label` (e.g. "Service charge").
+export type AdjustmentKind = "tax" | "tip" | "discount";
 
 export interface ExtractedItem {
   /** Stable id assigned at persistence (echoed back so #7 can reference it). */
@@ -141,9 +144,12 @@ export interface ExtractedItem {
 export interface ExtractedAdjustment {
   id: string;
   kind: AdjustmentKind;
-  label: string; // e.g. "Service charge 12.5%"
-  amountMinor: number; // integer pence; NEGATIVE for discounts
-  confidence: number; // 0..1
+  label: string; // e.g. "Service charge"
+  // Matches the canonical schema + the #7 edit contract: percent is PRESERVED (not resolved to
+  // pence at extraction) so the user can later change the rate.
+  isPercent: boolean;
+  amount: number; // basis points when isPercent (1250 = 12.50%), else pence; NEGATIVE for discounts
+  // NOTE: no per-adjustment confidence — adjustments are not confidence-flagged in V1.
 }
 
 export interface ExtractionResult {
@@ -157,10 +163,14 @@ export interface ExtractionResult {
   date: string | null; // ISO yyyy-mm-dd if read, else null
   items: ExtractedItem[]; // unassigned
   adjustments: ExtractedAdjustment[];
-  subtotalMinor: number; // sum of lineTotalMinor
-  adjustmentsTotalMinor: number; // sum of adjustment amountMinor (discounts negative)
-  totalMinor: number; // as printed on the receipt
-  /** false when subtotal + adjustments != printed total (Req 5.7); amounts left untouched. */
+  // The three totals below are DERIVED (not persisted) — convenience for the processing screen
+  // and the reconcile check. adjustmentsTotalMinor resolves any percent adjustments on the
+  // subtotal (the same `× bps / 10000` rule the split engine uses).
+  subtotalMinor: number; // sum of item lines
+  adjustmentsTotalMinor: number; // resolved signed pence (percent adjustments resolved on subtotal)
+  printedTotalMinor: number; // total as printed on the receipt
+  /** Transient (not a column): false when subtotal + resolved adjustments != printed total
+   *  (Req 5.7); amounts left untouched. */
   reconciled: boolean;
   /** true when some lines could not be read but others could (Req 6.3). */
   partial: boolean;
@@ -181,22 +191,24 @@ export type ExtractResponse = ExtractionResult | UnreadableResult;
 ### Persistence (reference: `data-and-persistence` schema)
 
 This feature **does not invent** tables — it writes into the canonical schema owned by spec #2
-(`data-and-persistence`) and the pence-based domain types in `microservices/core`. The shapes it
-relies on, contributed back to that schema:
+(`data-and-persistence`), using its **exact column names** (the schema is the source of truth;
+this section was reconciled to it). The columns it writes:
 
-- `expenses` — adds/uses `status` (`draft` | `finalized`), `currency` (`'GBP'`), `merchant`,
-  `subtotal_minor`, `adjustments_total_minor`, `total_minor`, **`receipt_image_key`**, `group_id`,
-  `payer_id`, `reconciled`.
-- `receipt_items` — `id`, `expense_id`, `description`, `quantity`, `unit_price_minor`,
-  `line_total_minor`, `confidence` (real), `flag_reason` (nullable text), `position` (order);
-  assignment columns exist in the schema but are left **null** here (filled by #7).
-- `receipt_adjustments` — `id`, `expense_id`, `kind`, `label`, `amount_minor` (signed),
-  `confidence`.
+- `expenses` — `status` (`draft`), `currency` (`'GBP'`), `merchant`, **`receipt_image_key`**,
+  `group_id`, **`payer_member_id`**, `created_by`. (No stored totals/`reconciled` column — those
+  are derived; see the result fields above.)
+- `receipt_items` — `id`, `expense_id`, `description`, `quantity`, **`unit_price`** (pence),
+  `confidence` (numeric 0..1), **`flag`** (nullable text), `group_label`, **`sort_order`** (order).
+  No assignment is written here — assignments live in the separate `item_assignments` table,
+  filled by #7. (`line_total` is not stored — it's `unit_price * quantity`.)
+- `receipt_adjustments` — `id`, `expense_id`, `kind`, `is_percent`, **`amount`** (bps if percent
+  else pence, signed), `label`. (No `confidence` column.)
 
-Mapping note: the prototype's `item.conf` → `confidence`, `item.flag` → `flag_reason`,
-`item.price` (pence) → `unit_price_minor`, `item.qty` → `quantity`; the prototype's
-`adjustments[]` (`{kind, mode:'percent'|'fixed', value}`) is **resolved to integer pence
-`amount_minor`** at extraction time so storage and the split engine never deal in percentages.
+Mapping note: the prototype's `item.conf` → `confidence`, `item.flag` → `flag`, `item.price`
+(pence) → `unit_price`, `item.qty` → `quantity`. A printed **service charge** maps to
+`kind: 'tip'` with `label: "Service charge"`. Percent adjustments are **preserved** as
+`is_percent = true` + `amount` in basis points (not resolved to pence at extraction) — so storage
+matches the #7 edit contract and the split engine, and the user can later change the rate.
 
 ## API Contract
 

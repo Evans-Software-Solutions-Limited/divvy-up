@@ -112,9 +112,9 @@ didn't have and the apportionment is transparent.
 
 1. WHEN an adjustment has mode `fixed` THE SYSTEM SHALL use its `value` (in pence) as the
    adjustment amount.
-2. WHEN an adjustment has mode `percent` THE SYSTEM SHALL compute its amount as
-   `round(itemsSubtotal * value / 100)`, computed on the **items subtotal** (not the
-   adjusted/assigned subtotal).
+2. WHEN an adjustment has mode `percent` THE SYSTEM SHALL treat `value` as **basis points** and
+   compute its amount as `round(itemsSubtotal * value / 10000)`, computed on the **items subtotal**
+   (not the adjusted/assigned subtotal).
 3. WHERE an adjustment is of kind `discount` THE SYSTEM SHALL force its amount negative
    (`-abs(amount)`).
 4. THE SYSTEM SHALL distribute each adjustment **pro-rata** across the members who currently hold

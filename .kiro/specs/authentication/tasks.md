@@ -92,8 +92,8 @@
 ## Backend — user provisioning
 
 - [ ] 15. Implement `provisionUser(claims)` in `packages/api-utils/src/auth/provisionUser.ts`
-      against `packages/db` `users` — `INSERT … ON CONFLICT (supabase_sub) DO NOTHING RETURNING id`
-      then resolve the internal `userId`; idempotent and concurrency-safe. Vitest: creates on
+      against `packages/db` `users` — `INSERT … ON CONFLICT (id) DO NOTHING` keyed on `id = sub`,
+      returning `sub` as `userId`; idempotent and concurrency-safe. Vitest: creates on
       first call, reuses on second, no duplicate under concurrent calls, `500` on DB error.
       _Requirements: 11.1, 11.2, 11.3, 11.5_
 
