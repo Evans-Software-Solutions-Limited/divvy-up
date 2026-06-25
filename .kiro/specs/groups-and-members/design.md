@@ -115,22 +115,24 @@ it is computed as 0 until that feature lands (the contract field exists from day
 > **Schema is owned by the `data-and-persistence` spec.** This section describes the shape this
 > feature depends on; the canonical Drizzle definitions live in `packages/db`.
 
-- **`groups`** — `id` (uuid pk), `name` (text), `emoji` (text), `cover_index` (smallint, palette
-  slot for the card cover), `created_by` (uuid → auth user, the owner), `currency` (text, default
-  `GBP`), `created_at`, `updated_at`.
-- **`group_members`** — `id` (uuid pk), `group_id` (fk → groups), `user_id` (uuid nullable → auth
-  user; null for placeholders), `name` (text, display name), `colour_index` (smallint 0–7),
-  `is_placeholder` (boolean), `is_owner` (boolean), `status` (`active` | `inactive`),
-  `created_at`. Uniqueness: a user appears at most once per group (`unique(group_id, user_id)`
-  where `user_id` not null).
+- **`groups`** — `id` (uuid pk), `name` (text), `emoji` (text), `cover_index` (integer 0–7,
+  nullable, palette slot for the card cover), `created_by` (uuid → users, the owner),
+  `created_at`, `updated_at`. (No `currency` column — currency lives on `expenses`; GBP is the V1
+  constant, per `steering`.)
+- **`group_members`** — `id` (uuid pk), `group_id` (fk → groups), `user_id` (uuid nullable → users;
+  null for placeholders), `name` (text, display name), `colour_index` (integer 0–7),
+  `placeholder` (boolean), `active` (boolean, soft-delete), `created_at`. Uniqueness: a user
+  appears at most once per group (`unique(group_id, user_id)` where `user_id` not null).
+  **Ownership is derived**, not stored: a member is the owner iff `user_id == groups.created_by`.
 - **`group_invites`** — `id` (uuid pk), `group_id` (fk), `member_id` (uuid nullable → the
   placeholder seat this invite fills, if any), `token` (text, indexed unique — store a hash, not
   the raw token), `created_by` (uuid), `expires_at` (timestamptz), `used_at` (timestamptz
   nullable), `created_at`.
 
 Domain `types.ts` reconciliation (per `steering/tech.md`): extend `Member` with `colourIndex`,
-`isPlaceholder`, `isOwner`, `status`, and keep `userId` optional. `Group` gains `emoji`,
-`coverIndex`, `currency` (default `GBP`), `ownerId`.
+`placeholder`, `active`, and keep `userId` optional. `isOwner` and the wire `status` are
+**derived** values (from `groups.created_by` and `active`), not stored fields. `Group` gains
+`emoji`, `coverIndex`, `ownerId` (= `created_by`).
 
 The **people-colour palette** is the canonical mapping (also in `styles/tokens.css`):
 
@@ -151,14 +153,16 @@ verified auth token; `userId` is taken from the token, never the body. Money is 
 type Member = {
   id: string; groupId: string; name: string; initials: string;
   colourIndex: number;            // 0–7 → --p1…--p8
-  isPlaceholder: boolean; isOwner: boolean; status: "active" | "inactive";
+  placeholder: boolean;
+  isOwner: boolean;               // DERIVED: userId === group.createdBy (not a column)
+  status: "active" | "inactive";  // DERIVED from the `active` column
   userId: string | null;
 };
 type GroupSummary = {
-  id: string; name: string; emoji: string; coverIndex: number;
+  id: string; name: string; emoji: string; coverIndex: number | null;
   members: Member[]; yourBalance: number;   // pence; +owed to you, −you owe, 0 settled
 };
-type GroupDetail = GroupSummary & { ownerId: string; currency: string; createdAt: string };
+type GroupDetail = GroupSummary & { ownerId: string; createdAt: string }; // currency is GBP (V1 constant)
 
 // ── Groups ──
 GET    /groups                      → 200 GroupSummary[]                         // Req 1

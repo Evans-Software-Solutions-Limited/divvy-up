@@ -9,9 +9,9 @@
 - [ ] 1. Define the shared API/type contract for groups, members and invites
   - Add exported payload types (`Member`, `GroupSummary`, `GroupDetail`, invite payloads) to the
     Elysia app's type surface so eden can consume them; mirror the API Contract in `design.md`.
-  - Reconcile `microservices/core/src/domain/types.ts`: extend `Member` with `colourIndex`,
-    `isPlaceholder`, `isOwner`, `status`; add `emoji`, `coverIndex`, `currency` (default `GBP`),
-    `ownerId` to `Group`.
+  - Reconcile `microservices/core/src/domain/types.ts`: extend `Member` with `colourIndex` (0–7),
+    `placeholder`, `active` (`isOwner` and wire `status` are derived, not stored); add `emoji`,
+    `coverIndex`, `ownerId` (= `createdBy`) to `Group`.
   - _Requirements: 1.1, 2.1, 5.1, 5.7, 6.1_
 
 - [ ] 2. Build a typed in-memory mock client implementing the full contract

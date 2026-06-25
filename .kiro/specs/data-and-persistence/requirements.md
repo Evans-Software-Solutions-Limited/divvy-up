@@ -99,20 +99,24 @@ model every Divvy Up entity with correct types, keys, and relationships, so that
 
 1. THE SYSTEM SHALL define a `users` table (id, email, display name, timestamps) keyed by a
    UUID that corresponds to the Supabase Auth user id.
-2. THE SYSTEM SHALL define a `groups` table with `name`, `emoji`, `cover_colour`, an owner
-   `created_by` user reference, and timestamps.
+2. THE SYSTEM SHALL define a `groups` table with `name`, `emoji`, `cover_index` (people-palette
+   slot 0..7), an owner `created_by` user reference, and timestamps.
 3. THE SYSTEM SHALL define a `group_members` join table linking a group to a person, with
-   `colour_index` (the people-palette slot), a `placeholder` boolean for accountless
-   members, and an **optional** `user_id` linking to `users`.
+   `colour_index` (the people-palette slot, 0..7), a `placeholder` boolean for accountless
+   members, an `active` boolean for soft-delete (members referenced by expenses/assignments
+   cannot be hard-deleted), and an **optional** `user_id` linking to `users`. Ownership is
+   **derived** (`user_id == groups.created_by`), not a stored column.
 4. THE SYSTEM SHALL define an `expenses` table with a single `payer_member_id`, a
    `status` enum (`draft` | `finalized`), `receipt_image_key`, `merchant`, a `currency`
    defaulting to `GBP`, a `description`, a `date`, and timestamps.
 5. THE SYSTEM SHALL define a `receipt_items` table with `description`, `unit_price`,
-   `quantity`, a `confidence` value in the range 0..1, an optional `flag` text, and an
+   `quantity`, an `assignment_mode` enum (`one` | `equal` | `everyone` | `custom`; null =
+   unassigned), a `confidence` value in the range 0..1, an optional `flag` text, and an
    optional `group_label` (e.g. "The wine round").
-6. THE SYSTEM SHALL define an `item_assignments` table expressing the four assignment modes
-   (`one` | `equal` | `everyone` | `custom`) as an enum, with member rows and an integer
-   `share_weight` used only by `custom`.
+6. THE SYSTEM SHALL define an `item_assignments` table holding the member rows for `one`,
+   `equal`, and `custom` (with an integer `share_weight` used only by `custom`). An `everyone`
+   item SHALL store **no** rows — its mode on `receipt_items` resolves to the group's current
+   members at finalize, so later joiners are included automatically.
 7. THE SYSTEM SHALL define a `receipt_adjustments` table with a `kind` enum
    (`tax` | `tip` | `discount`), a percent-or-fixed indicator, and the amount.
 8. THE SYSTEM SHALL define a `settlements` table recording mark-as-paid records (group, from
@@ -143,8 +147,10 @@ unit_price`, `receipt_adjustments.amount`, `settlements.amount`, `activity.amoun
 5. THE SYSTEM SHALL constrain `receipt_adjustments` so a percent adjustment stores its rate
    in basis points or hundredths as an integer, never a float, and a fixed adjustment stores
    pence; discounts are represented as negative amounts.
-6. WHERE `item_assignments.mode` is anything other than `custom` THE SYSTEM SHALL ignore /
-   not require `share_weight` (a `CHECK` ensures custom rows carry a positive weight).
+6. WHERE an item's `assignment_mode` (on `receipt_items`) is anything other than `custom` THE
+   SYSTEM SHALL not require `share_weight` on its `item_assignments` rows (a `CHECK` ensures any
+   present `share_weight` is a positive integer; the repository enforces weights iff mode is
+   `custom`).
 
 ### Requirement 6 — Many-to-many join integrity
 
@@ -205,8 +211,10 @@ input)`, and `findById(userId, id)` that hydrates the group's members.
 4. WHEN `ExpensesRepository.create` is called THE SYSTEM SHALL insert the expense, its
    receipt items, their assignments, and adjustments in a single transaction with `status`
    defaulting to `draft`.
-5. WHEN `updateItemAssignment` is called THE SYSTEM SHALL replace the item's assignment rows
-   atomically (delete prior rows, insert new rows for the chosen mode/members/weights).
+5. WHEN `updateItemAssignment` is called THE SYSTEM SHALL atomically set the item's
+   `assignment_mode` (on `receipt_items`) and replace its `item_assignments` member rows —
+   inserting member rows (+ weights for `custom`) for `one`/`equal`/`custom`, and **no** rows for
+   `everyone` (mode only) or `unassigned` (mode null, no rows).
 6. THE SYSTEM SHALL provide a `SettlementsRepository` with `record(userId, input)` and
    `listByGroup(userId, groupId)` writing mark-as-paid records with no money movement.
 7. THE SYSTEM SHALL provide an `ActivityRepository` with `append(userId, entry)` and
@@ -225,7 +233,7 @@ product decisions, so that the type contract the handlers and clients use is acc
 1. THE SYSTEM SHALL change `CustomShare` from a float `fraction` to an integer `weight`.
 2. THE SYSTEM SHALL change the default/expected `currency` from `USD` to `GBP`.
 3. THE SYSTEM SHALL extend `Member` with `colourIndex`, `placeholder`, and optional `userId`.
-4. THE SYSTEM SHALL extend `Group` with `emoji` and `coverColour`.
+4. THE SYSTEM SHALL extend `Group` with `emoji` and `coverIndex`, and `Member` with `active`.
 5. THE SYSTEM SHALL extend `ReceiptItem` with `confidence`, optional `flag`, and optional
    `groupLabel`.
 6. THE SYSTEM SHALL prefer Drizzle schema-inferred types (`$inferSelect` / `$inferInsert`) as

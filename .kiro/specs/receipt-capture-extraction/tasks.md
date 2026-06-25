@@ -9,7 +9,7 @@
 
 - [ ] **1. Define the Extraction Contract types**
       Rewrite `microservices/other-service/src/types/receipt.ts` to the GBP/pence contract from
-      `design.md`: `ExtractedItem` (with `confidence` + `flagReason`, integer `*Minor`),
+      `design.md`: `ExtractedItem` (with `confidence` + `flagReason`, integer-pence amounts),
       `ExtractedAdjustment` (`kind` ∈ tax|tip|discount, `isPercent`, signed `amount` = bps|pence),
       `ExtractionResult` (`outcome:"extracted"`,
       `draftExpenseId`, `reconciled`, `partial`, `overallConfidence`), `UnreadableResult`, and the
@@ -102,8 +102,8 @@
 
 - [ ] **13. ReceiptExtractService normalization**
       Implement `ReceiptExtractService`: fetch object → call provider → normalize to the contract —
-      clamp money to integer pence, clamp confidence to `0..1`, compute `subtotalMinor`,
-      `adjustmentsTotalMinor`, set `reconciled` when sums mismatch (never alter amounts), set
+      clamp money to integer pence, clamp confidence to `0..1`, compute `subtotal`,
+      `adjustmentsTotal`, set `reconciled` when sums mismatch (never alter amounts), set
       `partial` and `overallConfidence`, map a non-receipt to `outcome:"unreadable"`. Tests cover each
       fixture and each normalization rule.
       _Requirements: 5.1, 5.2, 5.6, 5.7, 5.8, 6.1, 6.3, 6.4_

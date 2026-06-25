@@ -73,9 +73,11 @@ is fixed in `design.md` (note the custom-assignment `weight` reconciliation).
       _Requirements: 4.4, 7.2, 7.3, 7.4, 7.5_
 
 - [ ] **14. Finalize via split engine.** Replace `computeBalances` usage so finalize computes
-      per-member balances through `packages/split-engine` (pro-rata adjustments, `everyone` resolved
-      against `memberIds`, payer excluded); persist status `draft→finalized` and the balances; return
-      `{ expense, balances }`. _Requirements: 8.1, 8.2, 8.3, 8.4_
+      per-member balances through `packages/split-engine`'s `balancesFromExpense` (pro-rata
+      adjustments, payer excluded). The handler **derives the group's current member list
+      server-side** (`MembersRepository.listByGroup`) to resolve `everyone` — never from the request
+      body. Persist status `draft→finalized` and the balances; return `{ expense, balances }`.
+      _Requirements: 8.1, 8.2, 8.3, 8.4_
 
 - [ ] **15. Finalize guards.** Reject finalize with `422 { error, unassignedItemIds }` when any item
       is unassigned (status unchanged); make re-finalizing a finalized expense idempotent.

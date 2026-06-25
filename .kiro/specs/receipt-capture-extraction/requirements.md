@@ -146,8 +146,8 @@ editable, trustworthy draft with "check this" flags.
 #### Acceptance Criteria
 
 5.1. WHEN extraction runs against a readable receipt THE SYSTEM SHALL return an ordered array of
-line items, each with: a `description` (string), `quantity` (integer ≥ 1), `unitPriceMinor`
-(integer pence ≥ 0), `lineTotalMinor` (integer pence ≥ 0), a `confidence` (float `0..1`), and an
+line items, each with: a `description` (string), `quantity` (integer ≥ 1), `unitPrice`
+(integer pence ≥ 0), `lineTotal` (integer pence ≥ 0), a `confidence` (float `0..1`), and an
 optional `flagReason` (string or null).
 
 5.2. THE SYSTEM SHALL express **all** monetary amounts as **integer pence (minor units)** and
@@ -167,10 +167,10 @@ an `isPercent` boolean, and an `amount` (**basis points when `isPercent`**, e.g.
 12.50%; otherwise integer pence; **negative for discounts**). Percentage charges SHALL be
 **preserved** as `isPercent: true` + basis points, not resolved to pence.
 
-5.6. THE SYSTEM SHALL return receipt totals as integer pence: `subtotalMinor` (sum of line
-totals before adjustments), `adjustmentsTotalMinor`, and `totalMinor` as printed.
+5.6. THE SYSTEM SHALL return receipt totals as integer pence: `subtotal` (sum of line
+totals before adjustments), `adjustmentsTotal`, and `printedTotal` as printed.
 
-5.7. IF the sum of line totals plus adjustments does not equal the printed `totalMinor` THEN THE
+5.7. IF the sum of line totals plus adjustments does not equal the `printedTotal` THEN THE
 SYSTEM SHALL still return the values it read, set a top-level `reconciled: false`, and SHALL NOT
 silently alter amounts to force a match.
 

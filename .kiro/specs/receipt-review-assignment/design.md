@@ -154,10 +154,14 @@ Body: `{ adjustments: { kind: "tax"|"tip"|"discount"; amount: number /* bps if i
 
 **3. Finalize**
 `POST /expenses/:id/finalize`
-Body: `{ memberIds: string[] /* full group member list, resolves "everyone" */ }`
+Body: _none_. The handler **derives the group's current member list server-side**
+(`MembersRepository.listByGroup`) to resolve `everyone` and pass to `balancesFromExpense` — the
+client never supplies `memberIds` (it could be stale/forged and would silently change the split).
 → `200 { expense: Expense; balances: Balance[] }` · `403` · `404` ·
 `422 { error, unassignedItemIds: string[] }` (items still unassigned).
 Idempotent: re-finalizing a finalized expense returns the same `{ expense, balances }`.
+`Balance` is the domain type `{ groupId, fromMemberId, toMemberId, amount }` (amount = pence,
+`from` owes `to`).
 
 ---
 

@@ -42,6 +42,9 @@ divvy-up/
 - **Tests** live in `__tests__/` next to the code under test.
 - **Shared types** that cross FE/BE flow through the Elysia app's exported types (eden) and
   `packages/db` schema-inferred types — avoid duplicate hand-written type definitions.
-- **Money** is always `number` in pence at the boundary; format only at the view layer.
+- **Money** is always `number` in pence at the boundary; format only at the view layer. Money
+  fields are named **plainly** (`amount`, `unitPrice`, `yourBalance`) with a `// pence` comment —
+  **no `Pence`/`Minor` suffix** — matching the canonical schema (`amount`, `unit_price`) and
+  `domain/types.ts`. One unit, one naming convention across schema, wire, and engine.
 - New mobile screens belong to exactly one feature spec; shared UI primitives belong to
   `mobile-app-foundation`.

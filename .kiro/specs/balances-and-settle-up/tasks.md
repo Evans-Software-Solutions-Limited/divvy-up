@@ -19,7 +19,7 @@
 
 ## Phase 2 — Mobile UI against the mock
 
-- [ ] 3. Build `BalancesScreen` hero: signed `yourPositionPence` rendered with `--pos` when
+- [ ] 3. Build `BalancesScreen` hero: signed `yourPosition` rendered with `--pos` when
      positive ("owed to you"), `--neg` when negative ("you owe"), neutral `£0.00` when zero, plus
      the "N still to settle" count. _Requirements: 2.1, 2.2, 2.3, 2.6, 4.2_
 
@@ -51,8 +51,9 @@
 
 - [ ] 10. Create `balancesService.computeForGroup(groupId, userMemberId)` in
       `microservices/core/src/application/balances/`: load `finalized` expenses only, expand each
-      single-payer expense into `member → payer` obligations via `packages/split-engine`
-      (`computeSplit`), and accumulate a pairwise net ledger. Replace the legacy
+      single-payer expense into `member → payer` obligations via `packages/split-engine`'s
+      `balancesFromExpense(expense, memberIds)` (not raw `computeSplit` — reuse the purpose-built
+      function), and accumulate a pairwise net ledger. Replace the legacy
       `finalize/computeBalances.ts` usage. _Requirements: 1.1, 1.2, 1.3, 1.4_
 
 - [ ] 11. Extend the service to subtract recorded settlements from the pair ledger, emit only

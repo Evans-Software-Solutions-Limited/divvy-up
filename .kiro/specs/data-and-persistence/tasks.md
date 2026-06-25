@@ -33,14 +33,15 @@
 - [ ] **4. Define enums and the `users` + `groups` tables**
   - Add `src/schema.ts` with `expenseStatus`, `assignmentMode`, `adjustmentKind`,
     `activityKind` pgEnums.
-  - Define `users` (uuid PK = Supabase auth id, unique email, display name, timestamps) and
-    `groups` (name, emoji, cover_colour, `created_by` FK → users, timestamps, creator index).
+  - Define `users` (uuid PK = Supabase auth id, unique email, **nullable** display name,
+    timestamps) and `groups` (name, emoji, `cover_index` 0..7 nullable + CHECK, `created_by`
+    FK → users, timestamps, creator index).
   - _Requirements: 4.1, 4.2, 4.10_
 
-- [ ] **5. Define `group_members` with placeholder + colour + partial-unique account link**
+- [ ] **5. Define `group_members` with placeholder + colour + soft-delete + partial-unique account link**
   - Columns: `group_id` FK (cascade), nullable `user_id` FK (set null), `name`,
-    `colour_index`, `placeholder` boolean default false, timestamps.
-  - Add the `1..8` colour CHECK, a `group_id` index, and the **partial** unique index over
+    `colour_index`, `placeholder` boolean default false, `active` boolean default true, timestamps.
+  - Add the `0..7` colour CHECK, a `group_id` index, and the **partial** unique index over
     `(group_id, user_id) WHERE user_id IS NOT NULL`.
   - _Requirements: 4.3, 5.\* (colour_index integer), 6.1, 6.2_
 
@@ -49,14 +50,16 @@
     description, date, `status` enum default `draft`, `receipt_image_key`, `merchant`,
     `currency` default `GBP`, `created_by`, timestamps, group index.
   - `receipt_items`: `expense_id` FK (cascade), description, `unit_price` **integer pence**,
-    `quantity` integer default 1, `confidence` numeric(4,3), `flag`, `group_label`,
-    `sort_order`; CHECKs for `quantity > 0` and `confidence` in `0..1`; expense index.
+    `quantity` integer default 1, `assignment_mode` enum (nullable; null = unassigned),
+    `confidence` numeric(4,3), `flag`, `group_label`, `sort_order`; CHECKs for `quantity > 0`
+    and `confidence` in `0..1`; expense index.
   - _Requirements: 4.4, 4.5, 5.1, 5.3, 5.4_
 
 - [ ] **7. Define `item_assignments`, `receipt_adjustments`, `settlements`, `activity`**
-  - `item_assignments`: `item_id` FK (cascade), `member_id` FK → group_members (restrict),
-    `mode` enum, `share_weight` **integer (custom only)**; unique `(item_id, member_id)`;
-    the `weightRule` CHECK (`custom ⇒ share_weight > 0`, else `share_weight is null`).
+  - `item_assignments` (member rows for `one`/`equal`/`custom`; `everyone` stores none — its mode
+    is on `receipt_items`): `item_id` FK (cascade), `member_id` FK → group_members (restrict),
+    `share_weight` **integer (custom only)**; unique `(item_id, member_id)`; the `weightRule`
+    CHECK (`share_weight is null or share_weight > 0`).
   - `receipt_adjustments`: `expense_id` FK (cascade), `kind` enum, `is_percent` boolean,
     `amount` integer (bps if percent else pence; discounts negative), `label`.
   - `settlements`: group/from/to member FKs, `amount` integer pence, `recorded_by`,
@@ -77,8 +80,8 @@
 
 - [ ] **9. Reconcile `domain/types.ts` to the schema**
   - `CustomShare.fraction: number` → `weight: number` (integer); default `currency` USD → GBP;
-    extend `Member` with `colourIndex`, `placeholder`, `userId?`; extend `Group` with `emoji`,
-    `coverColour`; extend `ReceiptItem` with `confidence?`, `flag?`, `groupLabel?`.
+    extend `Member` with `colourIndex` (0..7), `placeholder`, `active`, `userId?`; extend `Group`
+    with `emoji`, `coverIndex`; extend `ReceiptItem` with `confidence?`, `flag?`, `groupLabel?`.
   - Where practical align these to `@divvy-up/db` `$inferSelect` types instead of duplicating
     field definitions. Update any compile errors this surfaces in services/handlers.
   - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.5, 9.6_

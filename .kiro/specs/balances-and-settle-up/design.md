@@ -23,20 +23,22 @@ Balances are **derived**, never stored. For a group the backend:
 
 1. **Loads finalized expenses.** `ExpensesRepository.listByGroup(groupId)` filtered to
    `status === "finalized"`. Drafts are ignored.
-2. **Expands each expense into per-member obligations** using the canonical split engine.
-   Each expense is **single-payer**: the payer fronted the whole bill, so every other assigned
-   member owes the payer their share. For expense `e` with payer `p`:
+2. **Expands each expense into per-member obligations** using the split engine's purpose-built
+   `balancesFromExpense(expense, memberIds)` (feature #3) — **not** a re-implementation. It runs
+   `computeSplit` internally, drops the payer, and returns `Balance[]` (`from` = each non-payer,
+   `to` = the payer, `amount` = their pence share incl. pro-rata adjustments):
 
    ```
-   shares = computeSplit(e.items, e.adjustments, e.memberIds)   // pence-exact, sums to total
-   for each member m != p:
-       obligation(m -> p) += shares[m]                          // m owes p
+   for each finalized expense e:
+       for each b in balancesFromExpense(e, e.memberIds):
+           obligation(b.fromMemberId -> b.toMemberId) += b.amount   // m owes the payer
    ```
 
-   `computeSplit` applies largest-remainder rounding so `Σ shares == e.total` exactly, and
-   distributes adjustments (tax/tip/service/discount) pro-rata to each member's assigned
-   subtotal. This **replaces** the legacy `finalize/computeBalances.ts`, whose independent
-   per-share `Math.round` can mis-sum and which skips adjustments.
+   `balancesFromExpense` applies largest-remainder rounding so shares sum exactly and distributes
+   adjustments (tax/tip/discount) pro-rata. Using it (rather than raw `computeSplit` + manual
+   payer-exclusion here) keeps one source of truth and **replaces** the legacy
+   `finalize/computeBalances.ts`, whose per-share `Math.round` can mis-sum and which skips
+   adjustments.
 
 3. **Accumulates directed obligations into a pairwise ledger.** Keyed by the unordered pair
    `{a, b}`, track a signed running total. Adding `obligation(m -> p)` adds `+amount` in the
@@ -142,35 +144,34 @@ pence. Shapes (TypeBox on the wire):
 type BalancesResponse = {
   groupId: string;
   // signed net for the authenticated user's member: + = owed to you, − = you owe
-  yourPositionPence: number;
+  yourPosition: number;
   pairsToSettle: number; // count of non-zero net pairs involving the user
   allSettled: boolean; // true when every net pair in the group is 0
   // every non-zero net pair in the group; from owes to; amount > 0
   netPairs: Array<{
     fromMemberId: string;
     toMemberId: string;
-    amountPence: number;
+    amount: number;
   }>;
   // convenience splits of the user's pairs for the two lists
-  owesYou: Array<{ memberId: string; amountPence: number }>; // others → you
-  youOwe: Array<{ memberId: string; amountPence: number }>; // you → others
+  owesYou: Array<{ memberId: string; amount: number }>; // others → you
+  youOwe: Array<{ memberId: string; amount: number }>; // you → others
 };
 
 // POST /groups/:groupId/settlements   (record-keeping only — no money moves)
 type CreateSettlementBody = {
   fromMemberId: string; // the debtor (who "paid")
   toMemberId: string; // the creditor
-  amountPence: number; // > 0, must be ≤ current outstanding net for the pair
+  amount: number; // > 0, must be ≤ current outstanding net for the pair
 };
 type Settlement = {
   id: string;
   groupId: string;
   fromMemberId: string;
   toMemberId: string;
-  amountPence: number;
-  currency: "GBP";
+  amount: number; // pence
   createdAt: string; // ISO
-};
+}; // currency is GBP (V1 constant) — not stored on settlements
 
 // GET /groups/:groupId/settlements -> Settlement[]
 
@@ -183,7 +184,7 @@ type ActivityEntry = {
   groupName: string; // denormalized for Home rendering
   actorMemberId: string;
   text: string; // e.g. "Theo paid for Groceries"
-  amountPence: number | null;
+  amount: number | null;
   settled: boolean; // true for settlement entries
   createdAt: string; // ISO; list is newest-first
 };
@@ -196,8 +197,8 @@ Uses the global structured error handler (request-id correlation, prod-safe stac
 
 - **404 / not-authorized** — user is not a member of the group (Req 6.2), or a referenced
   member/group is inaccessible (Req 6.3). No data returned, nothing recorded.
-- **400 validation** — `amountPence ≤ 0`; `fromMemberId == toMemberId`; member not in group;
-  `amountPence` exceeds the live outstanding net for the pair (Req 3.5) — recompute the net
+- **400 validation** — `amount ≤ 0`; `fromMemberId == toMemberId`; member not in group;
+  `amount` exceeds the live outstanding net for the pair (Req 3.5) — recompute the net
   inside the same request before writing to avoid a stale-read overpay.
 - **401** — missing/invalid JWT; the acting user is derived from the verified token, never
   from the body (Req 6.4).

@@ -34,7 +34,7 @@ and invite designs, which the prototype did not cover.
 
 - **User** — an authenticated Divvy Up account (Supabase Auth `user_id`).
 - **Member** — a person _within a group_. May be account-linked (`user_id` set) or a placeholder
-  (`user_id` null, `is_placeholder` true). The same user is a distinct member row per group.
+  (`user_id` null, `placeholder` true). The same user is a distinct member row per group.
 - **Owner** — the member who created the group (the `created_by` user). Has manage/delete rights.
 - **colour_index** — integer `0–7` mapping to palette slots `--p1…--p8`.
 
@@ -173,7 +173,7 @@ existing identity.
    to that `member_id` so acceptance converts that placeholder rather than creating a duplicate.
 3. WHEN an authenticated user opens a valid invite and accepts THE SYSTEM SHALL add them to the group:
    IF the invite is bound to a placeholder member THEN THE SYSTEM SHALL link that member row to the
-   accepting user (`user_id` set, `is_placeholder` false) preserving its `colour_index`, initials and
+   accepting user (`user_id` set, `placeholder` false) preserving its `colour_index`, initials and
    history; OTHERWISE THE SYSTEM SHALL create a new account-linked member with a non-clashing colour.
 4. IF an invite token is expired, already used, or invalid THEN THE SYSTEM SHALL reject acceptance
    with a clear, distinguishable error for each case and SHALL NOT modify the group.

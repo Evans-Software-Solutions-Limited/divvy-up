@@ -29,8 +29,9 @@ The current `microservices/other-service` extract handler (`POST /receipts/extra
 **mock** returning `OcrExtractResult` in **USD cents** with flat `tax`/`tip` and **no
 confidence**. This feature rewrites that contract:
 
-- USD/cents → **GBP/pence**, field names `*Minor` to make minor-units explicit.
-- flat `tax`/`tip` numbers → an **`adjustments[]`** array (`service`/`tip`/`tax`/`discount`).
+- USD/cents → **GBP/pence** (plain field names + `// pence` comments, per `steering/structure.md`).
+- flat `tax`/`tip` numbers → an **`adjustments[]`** array (`tax`/`tip`/`discount`; a printed
+  service charge normalises to `tip` with the wording kept in `label`).
 - add **per-item `confidence` + `flagReason`** (the prototype's `conf` / `flag`).
 - add a **typed outcome** (`extracted` | `unreadable`) so failure degrades honestly.
 - the handler now **persists a draft** and returns its id, not just an OCR blob.
@@ -104,7 +105,7 @@ Layering matches `microservices/core` (handler thin → service → repositories
 | -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `receiptUploadHandler`           | `POST /receipts/upload-url` (and the `/receipts/upload` proxy fallback). Validates body, asserts group membership, mints the S3 key + presigned PUT URL via `ReceiptStorageRepository`.                                                           |
 | `receiptExtractHandler`          | `POST /receipts/extract` (rewritten). Validates body, asserts membership + key ownership, calls `ReceiptExtractService`, maps `Result` → HTTP.                                                                                                    |
-| `ReceiptExtractService`          | Domain orchestration: fetch object → call `ExtractionProvider` → normalize to the contract (pence, clamp confidence to `0..1`, compute `subtotalMinor`/`reconciled`) → persist draft in one tx → return contract + `draftExpenseId`.              |
+| `ReceiptExtractService`          | Domain orchestration: fetch object → call `ExtractionProvider` → normalize to the contract (pence, clamp confidence to `0..1`, compute `subtotal`/`reconciled`) → persist draft in one tx → return contract + `draftExpenseId`.                   |
 | `ExtractionProvider` (interface) | `extract(image: Bytes, hint): Promise<Result<RawExtraction, ExtractError>>`. Two impls: `TextractExtractionProvider` **or** `ClaudeVisionExtractionProvider` (chosen by config/secret), plus `FixtureExtractionProvider` for deterministic tests. |
 | `ReceiptStorageRepository`       | S3 access: presign PUT, `getObject(key)`, key minting/validation (`receipts/{userId}/{groupId}/{uuid}.jpg`). Wraps the `infra/storage.ts` bucket binding.                                                                                         |
 | `DraftExpenseRepository`         | Persists draft expense + items + adjustments via `packages/db` in a transaction; scoped to user + group (Req 7). Owned conceptually by `data-and-persistence`; this feature adds the draft-from-extraction write path.                            |
@@ -116,7 +117,8 @@ and lets Textract vs Claude vision be swapped without touching the handler or th
 
 ### Extraction Contract (the FE↔BE bridge — feature #7 consumes this)
 
-All money is **integer pence**. Field names carry `Minor` to make that unmissable.
+All money is **integer pence**, named plainly with a `// pence` comment (no `Minor`/`Pence`
+suffix — per `steering/structure.md`).
 
 ```ts
 // microservices/other-service/src/types/receipt.ts  (rewrites the existing USD/cents shape)
@@ -133,8 +135,8 @@ export interface ExtractedItem {
   id: string;
   description: string;
   quantity: number; // integer ≥ 1
-  unitPriceMinor: number; // integer pence ≥ 0
-  lineTotalMinor: number; // integer pence ≥ 0  (== unitPriceMinor * quantity unless the receipt prints otherwise)
+  unitPrice: number; // integer pence ≥ 0
+  lineTotal: number; // integer pence ≥ 0  (== unitPrice * quantity unless the receipt prints otherwise)
   confidence: number; // 0..1
   /** Present iff the model is unsure; drives the amber "check this" flag in #7. */
   flagReason: string | null;
@@ -164,11 +166,11 @@ export interface ExtractionResult {
   items: ExtractedItem[]; // unassigned
   adjustments: ExtractedAdjustment[];
   // The three totals below are DERIVED (not persisted) — convenience for the processing screen
-  // and the reconcile check. adjustmentsTotalMinor resolves any percent adjustments on the
+  // and the reconcile check. adjustmentsTotal resolves any percent adjustments on the
   // subtotal (the same `× bps / 10000` rule the split engine uses).
-  subtotalMinor: number; // sum of item lines
-  adjustmentsTotalMinor: number; // resolved signed pence (percent adjustments resolved on subtotal)
-  printedTotalMinor: number; // total as printed on the receipt
+  subtotal: number; // sum of item lines
+  adjustmentsTotal: number; // resolved signed pence (percent adjustments resolved on subtotal)
+  printedTotal: number; // total as printed on the receipt
   /** Transient (not a column): false when subtotal + resolved adjustments != printed total
    *  (Req 5.7); amounts left untouched. */
   reconciled: boolean;
@@ -259,6 +261,18 @@ Elysia `t.Object` schemas mirror the types above; the union response uses
 `t.Union([ExtractionResultSchema, UnreadableResultSchema])` discriminated on `outcome` so the
 eden client narrows correctly. Monetary fields validate as integers (`t.Integer()` / multipleOf 1).
 
+### Handler logic — resolving `payer_member_id`
+
+The `/extract` request carries only `{ receiptImageKey, groupId }`; the draft's `payer_member_id`
+is **derived server-side**, never taken from the body:
+
+1. Read `ctx.userId` from the auth middleware (spec #4).
+2. Look up the caller's membership via `MembersRepository` (spec #5): `findMembership(userId,
+groupId)` → the `group_members.id`. The creator is the default payer (single-payer model; the
+   user can reassign the payer in #7).
+3. If the user is not an active member of `groupId` → `403` and persist nothing.
+4. Use that `group_members.id` as `payer_member_id` when `DraftExpenseRepository` writes the draft.
+
 ## Error Handling
 
 | Failure                                   | Where                                  | Behavior                                                                                 |
@@ -284,7 +298,7 @@ confidence. Errors flow through the global structured error handler (request-id 
 **Unit / contract (Vitest, backend):**
 
 - `ReceiptExtractService` normalization: pence clamping, confidence clamping to `0..1`,
-  `subtotalMinor` computation, `reconciled` flag when sums mismatch, `overallConfidence` mean.
+  `subtotal` computation, `reconciled` flag when sums mismatch, `overallConfidence` mean.
 - Contract shape: every monetary field is an integer; discounts are negative; items have no
   assignment field; `unreadable` carries no items.
 - Membership / key-ownership guards return 403 and persist nothing.

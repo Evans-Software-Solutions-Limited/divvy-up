@@ -230,7 +230,7 @@ export const groups = pgTable(
     id: uuid("id").primaryKey().defaultRandom(),
     name: text("name").notNull(),
     emoji: text("emoji"), // e.g. "🍝"
-    coverColour: text("cover_colour"), // people-palette token e.g. "--p2"
+    coverIndex: integer("cover_index"), // people-palette slot 0..7 → --p1..--p8 (nullable)
     createdBy: uuid("created_by")
       .notNull()
       .references(() => users.id),
@@ -243,6 +243,10 @@ export const groups = pgTable(
   },
   (t) => ({
     byCreator: index("groups_created_by_idx").on(t.createdBy),
+    coverRange: check(
+      "groups_cover_index_range",
+      sql`${t.coverIndex} is null or (${t.coverIndex} between 0 and 7)`,
+    ),
   }),
 );
 
@@ -258,8 +262,12 @@ export const groupMembers = pgTable(
       onDelete: "set null",
     }), // null = placeholder
     name: text("name").notNull(), // display name (placeholder or cached)
-    colourIndex: integer("colour_index").notNull(), // 1..8 people-palette slot
+    colourIndex: integer("colour_index").notNull(), // 0..7 people-palette slot → --p1..--p8
     placeholder: boolean("placeholder").notNull().default(false),
+    // soft-delete: members referenced by expenses/assignments (FK restrict) can't be hard-deleted,
+    // so removal flips `active` to false. Ownership is NOT a column — it is derived
+    // (`group_members.user_id == groups.created_by`).
+    active: boolean("active").notNull().default(true),
     createdAt: timestamp("created_at", { withTimezone: true })
       .notNull()
       .defaultNow(),
@@ -272,7 +280,7 @@ export const groupMembers = pgTable(
       .where(sql`${t.userId} is not null`),
     colourRange: check(
       "group_members_colour_range",
-      sql`${t.colourIndex} between 1 and 8`,
+      sql`${t.colourIndex} between 0 and 7`,
     ),
   }),
 );
@@ -320,6 +328,11 @@ export const receiptItems = pgTable(
     description: text("description").notNull(),
     unitPrice: integer("unit_price").notNull(), // PENCE
     quantity: integer("quantity").notNull().default(1),
+    // The item's assignment MODE lives here (null = unassigned). `everyone` is stored as the mode
+    // alone with NO item_assignments rows, so it resolves dynamically to the group's CURRENT
+    // members at finalize (a new member is automatically included). `one`/`equal`/`custom` carry
+    // member rows in item_assignments.
+    assignmentMode: assignmentMode("assignment_mode"), // null until assigned
     confidence: numeric("confidence", { precision: 4, scale: 3 }), // 0.000..1.000, AI only
     flag: text("flag"), // e.g. "Couldn't read who this was for"
     groupLabel: text("group_label"), // e.g. "The wine round"
@@ -335,7 +348,10 @@ export const receiptItems = pgTable(
   }),
 );
 
-// ── item_assignments ── (join: item ↔ member; mode + integer weight for custom)
+// ── item_assignments ── (join: item ↔ member; member rows for one|equal|custom only)
+// The MODE lives on receipt_items. This table holds the explicit member list for `one` (1 row),
+// `equal` (N rows), and `custom` (N rows, each with a positive integer weight). `everyone` and
+// `unassigned` items have NO rows here.
 export const itemAssignments = pgTable(
   "item_assignments",
   {
@@ -346,8 +362,7 @@ export const itemAssignments = pgTable(
     memberId: uuid("member_id")
       .notNull()
       .references(() => groupMembers.id, { onDelete: "restrict" }),
-    mode: assignmentMode("mode").notNull(),
-    shareWeight: integer("share_weight"), // INTEGER weight, custom only (e.g. 2:1)
+    shareWeight: integer("share_weight"), // INTEGER weight, custom only (e.g. 2:1); null otherwise
   },
   (t) => ({
     byItem: index("item_assignments_item_idx").on(t.itemId),
@@ -355,11 +370,11 @@ export const itemAssignments = pgTable(
       t.itemId,
       t.memberId,
     ),
-    // custom rows must carry a positive integer weight; other modes must not
+    // a weight, when present, must be a positive integer (custom rows); the repository enforces
+    // that weights appear iff the item's mode is `custom`, since that mode lives on receipt_items.
     weightRule: check(
       "item_assignments_weight_rule",
-      sql`(${t.mode} = 'custom' and ${t.shareWeight} > 0)
-                      or (${t.mode} <> 'custom' and ${t.shareWeight} is null)`,
+      sql`${t.shareWeight} is null or ${t.shareWeight} > 0`,
     ),
   }),
 );
@@ -486,7 +501,7 @@ erDiagram
     uuid id PK
     text name
     text emoji
-    text cover_colour
+    int  cover_index "0..7, nullable"
     uuid created_by FK
   }
   group_members {
@@ -494,8 +509,9 @@ erDiagram
     uuid group_id FK
     uuid user_id FK "null = placeholder"
     text name
-    int  colour_index "1..8"
+    int  colour_index "0..7"
     bool placeholder
+    bool active "soft-delete"
   }
   expenses {
     uuid id PK
@@ -514,6 +530,7 @@ erDiagram
     text description
     int  unit_price "PENCE"
     int  quantity
+    enum assignment_mode "one|equal|everyone|custom, null=unassigned"
     num  confidence "0..1"
     text flag
     text group_label
@@ -522,7 +539,6 @@ erDiagram
     uuid id PK
     uuid item_id FK
     uuid member_id FK
-    enum mode "one|equal|everyone|custom"
     int  share_weight "custom only, integer"
   }
   receipt_adjustments {
@@ -559,10 +575,14 @@ erDiagram
 - **Membership uniqueness** is a partial unique index over `(group_id, user_id)` that only
   applies where `user_id is not null` — two placeholders named "Sam" are allowed; the same
   account joined twice is not.
-- **Assignment modes:** `everyone` / `equal` / `one` insert one `item_assignments` row per
-  member with `mode` set and `share_weight = null`; `custom` inserts one row per member with
-  a **positive integer `share_weight`**. The `weightRule` CHECK enforces this at the DB level
-  so the split engine (feature #3) can trust the weights are integers.
+- **Assignment modes:** the item's `assignment_mode` lives on `receipt_items` (null =
+  unassigned). `one` (1 row), `equal` (N rows, `share_weight = null`), and `custom` (N rows with a
+  **positive integer `share_weight`**) record their member lists in `item_assignments`.
+  **`everyone` stores NO `item_assignments` rows** — it is the mode alone, resolved to the group's
+  **current** members at finalize, so a member who joins later is automatically included (this is
+  why the split engine resolves `everyone` from a passed `memberIds`, rather than from stored
+  rows). Keeping the mode on the item is what lets `everyone` avoid a `member_id` (which is
+  `NOT NULL` here).
 - **Same-group integrity:** `payer_member_id` and every assignment's `member_id` must belong
   to the expense's group. The FK guarantees the row exists; the repository asserts the
   group match in the same transaction (a pure FK can't express "same group as the parent
@@ -586,7 +606,7 @@ class GroupsRepository {
   list(userId: string): Promise<Group[]>; // only groups user is a member of
   create(
     userId: string,
-    input: { name: string; emoji?: string; coverColour?: string },
+    input: { name: string; emoji?: string; coverIndex?: number },
   ): Promise<Group>;
   findById(userId: string, id: GroupId): Promise<Group | null>; // null if not a member
 }
@@ -707,15 +727,16 @@ export type Member = {
   id: MemberId;
   groupId: GroupId;
   name: string;
-  colourIndex: number;
+  colourIndex: number; // 0..7
   placeholder: boolean;
+  active: boolean; // false = soft-removed
   userId?: string;
 };
 export type Group = {
   id: GroupId;
   name: string;
   emoji?: string;
-  coverColour?: string;
+  coverIndex?: number; // 0..7 people-palette slot
   createdAt: string;
   members: Member[];
 };
