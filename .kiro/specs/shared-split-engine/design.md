@@ -117,14 +117,28 @@ export function balancesFromExpense(
 ): Balance[];
 ```
 
-`balancesFromExpense` adapts `Expense` → `SplitInput`:
+The domain→engine field mapping is itself an **exported, shared** function — `toSplitInput(items,
+adjustments, memberIds): SplitInput` — so the backend (`balancesFromExpense`) and the **mobile live
+preview** (feature #7) convert identically and cannot drift:
+
+```ts
+export function toSplitInput(
+  items: ReceiptItem[],
+  adjustments: ReceiptAdjustment[],
+  memberIds: MemberId[],
+): SplitInput;
+```
+
+It applies:
 
 - `items`: `{ id, price: unitPrice, qty: quantity, assign, conf? }` where `assign` maps the domain
-  `ItemAssignment` to the engine `Assignment` (see Data Models).
+  `ItemAssignment` (mode + member rows) to the engine `Assignment` (see Data Models).
 - `adjustments`: `{ kind, mode: isPercent ? "percent" : "fixed", value: amount }`. `amount` is the
   schema value verbatim — **basis points when `isPercent`** (e.g. `1250`), pence otherwise; no
   conversion (the engine consumes bps directly).
 - `memberIds`: passed through, used both for `everyone` resolution and as the canonical member set.
+
+`balancesFromExpense` is then just `toSplitInput` → `computeSplit` → drop payer → emit `Balance[]`.
 
 Then it runs `computeSplit`, drops the payer, and emits `Balance` rows for non-payers whose
 `perPerson` value is non-zero.
@@ -253,6 +267,13 @@ After all items are distributed into `perPerson`:
    that share. If nobody holds a positive share, fall back to equal weights over all `memberIds`.
 3. `parts = splitPence(amt, weights)` — so even the adjustment splits to the exact penny.
 4. Add each part into `adjByPerson`, and finally fold `adjByPerson` into `perPerson`.
+
+> **Provisional while unassigned:** a percent adjustment is computed on the **full** `itemsSubtotal`
+> (incl. any unassigned items) but distributed only across members who currently hold a share. So
+> while items remain unassigned, the assigned members provisionally carry the adjustment for the
+> unassigned portion too. This only ever shows in the **live preview** — finalize is **blocked**
+> until every item is assigned (feature #7), at which point `assignedSubtotal == itemsSubtotal` and
+> the apportionment is exact. The preview is honest about this (it's a preview), not hidden math.
 
 #### Worked pence example — pro-rata service charge
 

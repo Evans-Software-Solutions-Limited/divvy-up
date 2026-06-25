@@ -57,9 +57,10 @@ client adapter + query provider → remove web → tests.
 
 - [ ] 4. Add the API client adapter and TanStack Query provider
   - [ ] 4.1 Create `src/adapters/tokenProvider.ts` (`TokenProvider` type + `noopTokenProvider`)
-        and `src/adapters/apiClient.ts` (`createApiClient` via Eden/treaty typed against the
-        Elysia app export, `onRequest` bearer-token injection, non-2xx → `NormalizedApiError`,
-        base URL from `EXPO_PUBLIC_API_URL` with local default).
+        and `src/adapters/apiClient.ts` (`createApiClient` returning `{ core, receipts }` — one
+        Eden/treaty client per Elysia app export (`@divvy-up/core` + `@divvy-up/receipt-service`),
+        shared `onRequest` bearer-token injection, non-2xx → `NormalizedApiError`, base URLs from
+        `EXPO_PUBLIC_API_URL` + `EXPO_PUBLIC_RECEIPT_API_URL` with local defaults).
     - _Requirements: 5.1, 5.2, 5.3, 5.4, 5.6, 5.7_
   - [ ] 4.2 Create `src/adapters/ApiClientProvider.tsx` (context + provider building the client
         once, accepting a swappable `getToken` prop) and `useApiClient`.

@@ -94,6 +94,11 @@ we squared up outside the app.
    between those two members so the recomputed balances reflect the settlement.
 5. IF a settlement amount exceeds the current outstanding net between the pair THEN THE SYSTEM
    SHALL reject the request with a validation error and record nothing.
+   5a. THE SYSTEM SHALL validate the **direction**: `fromMemberId` MUST be the net **debtor** and
+   `toMemberId` the net **creditor** for that pair. IF the direction is reversed (the creditor
+   "paying" the debtor) or the pair is already settled (net 0) THEN THE SYSTEM SHALL reject the
+   request and record nothing — a settlement may only reduce an existing debt, never create or
+   flip one.
 6. WHEN a settlement is recorded THE SYSTEM SHALL also append a corresponding activity-feed
    entry (see Requirement 5).
 7. THE SYSTEM SHALL allow recording a settlement only between two members of a group the

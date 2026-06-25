@@ -12,7 +12,9 @@ is fixed in `design.md` (note the custom-assignment `weight` reconciliation).
 - [ ] **1. Typed mock + review state scaffold.** In `packages/mobile/src/features/receipt-review/`
       add a typed mock eden client and a `useReviewState` hook holding working items/adjustments and
       exposing the `computeSplit` result, `flaggedCount`, `unassignedPence`, and `canFinalize`. Import
-      `packages/split-engine` for all math; no local arithmetic. _Requirements: 5.1_
+      `packages/split-engine` for all math — build engine input via its exported `toSplitInput`
+      (the same mapper `balancesFromExpense` uses, so FE preview and BE finalize cannot diverge); no
+      local arithmetic and no hand-rolled domain→engine mapping. _Requirements: 5.1_
 
 - [ ] **2. Review screen shell + item rows.** Build `ReviewScreen` (header "you paid" + total +
       merchant + date) and `ItemRow` rendering description/qty/line amount and the assignment summary,

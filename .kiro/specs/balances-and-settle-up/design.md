@@ -52,7 +52,8 @@ Balances are **derived**, never stored. For a group the backend:
 
 5. **Emits net pairs.** For each pair with a non-zero net, emit
    `{ fromMemberId, toMemberId, amount }` with `amount > 0` and `from` = the net debtor. Pairs
-   that net to `0` are omitted (Requirement 1.5).
+   that net to `0` are omitted (Requirement 1.5). This is **pairwise netting only** — V1 does
+   **not** do transitive debt simplification (A→B→C ⇒ A→C); each owed pair stays explicit.
 
 6. **Computes the user's position.** `yourNet = Σ(amount where to == you) − Σ(amount where
 from == you)`. Positive ⇒ owed (`--pos`); negative ⇒ owes (`--neg`); zero ⇒ neutral. The
@@ -122,9 +123,9 @@ this feature **references** them and does not redefine them. Relevant tables:
 - **`settlements`** — `id`, `groupId` (fk), `fromMemberId` (fk), `toMemberId` (fk),
   `amount` (integer pence, > 0), `recordedBy` (fk → `users.id`), `createdAt`. (Currency is the
   group's; not a settlements column.)
-- **`activity`** — `id`, `groupId` (fk), `kind` (`expense_added` | `expense_finalized` |
-  `settled_up` | `member_added`), `actorMemberId` (fk), `amount` (nullable integer pence),
-  `expenseId` / `settlementId` (nullable fk), `createdAt`. (Field is `kind`, not `type`; settlement
+- **`activity`** — `id`, `groupId` (fk), `kind` (`expense_added` | `settled_up` | `member_added`),
+  `actorMemberId` (fk), `amount` (nullable integer pence), `expenseId` / `settlementId` (nullable
+  fk), `createdAt`. (Field is `kind`, not `type`; `expense_added` is emitted on finalize, settlement
   rows use `settled_up`, member joins use `member_added` — per the canonical `activity_kind` enum.)
 
 Balances are **not** a table — they are derived from `expenses` (status `finalized`),
@@ -179,7 +180,7 @@ type Settlement = {
 // GET /groups/:groupId/activity   (one group)
 type ActivityEntry = {
   id: string;
-  kind: "expense_added" | "expense_finalized" | "settled_up" | "member_added";
+  kind: "expense_added" | "settled_up" | "member_added";
   groupId: string;
   groupName: string; // denormalized for Home rendering
   actorMemberId: string;
@@ -198,6 +199,7 @@ Uses the global structured error handler (request-id correlation, prod-safe stac
 - **404 / not-authorized** — user is not a member of the group (Req 6.2), or a referenced
   member/group is inaccessible (Req 6.3). No data returned, nothing recorded.
 - **400 validation** — `amount ≤ 0`; `fromMemberId == toMemberId`; member not in group;
+  **wrong direction** (`fromMemberId` is not the net debtor / pair already settled, Req 3.5a);
   `amount` exceeds the live outstanding net for the pair (Req 3.5) — recompute the net
   inside the same request before writing to avoid a stale-read overpay.
 - **401** — missing/invalid JWT; the acting user is derived from the verified token, never

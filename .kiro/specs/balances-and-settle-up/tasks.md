@@ -75,16 +75,18 @@
       scoping. _Requirements: 3.2, 6.1, 6.3_
 
 - [ ] 15. Implement `settlementsService.record(...)`: validate non-self pair, amount > 0, both
-      members in group, and `amount ≤ live outstanding net` (recompute net in-request to avoid
-      stale overpay); persist; then append an activity entry. _Requirements: 3.2, 3.4, 3.5, 3.6_
+      members in group, **correct direction** (`from` is the net debtor; reject reversed or
+      already-settled pairs), and `amount ≤ live outstanding net` (recompute net in-request to
+      avoid stale overpay); persist; then append an activity entry.
+      _Requirements: 3.2, 3.4, 3.5, 3.5a, 3.6_
 
 - [ ] 16. Add `settlementsHandler`: `POST /groups/:groupId/settlements` (validate body, derive
       actor from JWT, never from body) and `GET /groups/:groupId/settlements`. Reject inaccessible
       member/group. _Requirements: 3.5, 3.7, 6.2, 6.3, 6.4_
 
 - [ ] 17. Unit + handler tests: records with timestamp; rejects over-net, zero/negative,
-      self-pair, non-member; appends activity; membership scoping; actor from token. _Requirements:
-      3.2, 3.5, 3.6, 3.7, 6.4_
+      self-pair, **reversed direction / already-settled pair**, non-member; appends activity;
+      membership scoping; actor from token. _Requirements: 3.2, 3.5, 3.5a, 3.6, 3.7, 6.4_
 
 ## Phase 5 — Activity repository + handler
 
@@ -93,9 +95,9 @@
       newest-first. _Requirements: 5.2, 5.3, 5.4_
 
 - [ ] 19. Emit activity entries at the source events using the canonical `activity_kind` enum:
-      `expense_finalized` on finalize, `member_added` on join (hook into the existing finalize and
-      groups/members flows), and `settled_up` from the settlements service (task 15).
-      _Requirements: 5.1, 5.5_
+      `expense_added` on finalize (the expense becomes part of balances), `member_added` on join
+      (hook into the existing finalize and groups/members flows), and `settled_up` from the
+      settlements service (task 15). _Requirements: 5.1, 5.5_
 
 - [ ] 20. Add `activityHandler`: `GET /activity` (user's groups) and
       `GET /groups/:groupId/activity`, both scoped to the verified user. _Requirements: 5.3, 5.4,

@@ -32,8 +32,9 @@ derivation, and its tests are updated/extended.
   `computeBalances`, the engine's types, exhaustive unit + property tests, and the integration of
   the engine into `microservices/core`'s finalize path.
 - **Out:** UI rendering of splits (owned by `receipt-review-assignment`), DB persistence of
-  shares (owned by `data-and-persistence`), netting/simplifying balances across multiple expenses
-  (owned by `balances-and-settle-up`), multi-currency conversion.
+  shares (owned by `data-and-persistence`), **pairwise netting** of balances across multiple
+  expenses (owned by `balances-and-settle-up`), multi-currency conversion. Transitive **debt
+  simplification** (A→B→C ⇒ A→C) is **not** in V1 — balances does pairwise netting only.
 
 ### Glossary
 

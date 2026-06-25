@@ -51,8 +51,9 @@
     `currency` default `GBP`, `created_by`, timestamps, group index.
   - `receipt_items`: `expense_id` FK (cascade), description, `unit_price` **integer pence**,
     `quantity` integer default 1, `assignment_mode` enum (nullable; null = unassigned),
-    `confidence` numeric(4,3), `flag`, `group_label`, `sort_order`; CHECKs for `quantity > 0`
-    and `confidence` in `0..1`; expense index.
+    `confidence` **`real`** (float4 → JS number; not `numeric`, which Drizzle maps to a string),
+    `flag`, `group_label`, `sort_order`; CHECKs for `quantity > 0` and `confidence` in `0..1`;
+    expense index.
   - _Requirements: 4.4, 4.5, 5.1, 5.3, 5.4_
 
 - [ ] **7. Define `item_assignments`, `receipt_adjustments`, `settlements`, `activity`**

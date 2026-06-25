@@ -181,8 +181,7 @@ export const adjustmentKind = pgEnum("adjustment_kind", [
   "discount",
 ]);
 export const activityKind = pgEnum("activity_kind", [
-  "expense_added",
-  "expense_finalized",
+  "expense_added", // emitted when an expense is finalized (becomes part of balances)
   "settled_up",
   "member_added",
 ]);
@@ -197,7 +196,7 @@ import {
   uuid,
   text,
   integer,
-  numeric,
+  real,
   boolean,
   timestamp,
   date,
@@ -333,7 +332,10 @@ export const receiptItems = pgTable(
     // members at finalize (a new member is automatically included). `one`/`equal`/`custom` carry
     // member rows in item_assignments.
     assignmentMode: assignmentMode("assignment_mode"), // null until assigned
-    confidence: numeric("confidence", { precision: 4, scale: 3 }), // 0.000..1.000, AI only
+    // `real` (float4), NOT `numeric` — Drizzle maps `numeric` to a JS **string**, which would
+    // break the split engine's `conf < 0.7` and the wire `confidence: number`. `real` returns a
+    // number; 0..1 needs no exact decimal precision.
+    confidence: real("confidence"), // 0..1, AI only (nullable for manual items)
     flag: text("flag"), // e.g. "Couldn't read who this was for"
     groupLabel: text("group_label"), // e.g. "The wine round"
     sortOrder: integer("sort_order").notNull().default(0),
@@ -531,7 +533,7 @@ erDiagram
     int  unit_price "PENCE"
     int  quantity
     enum assignment_mode "one|equal|everyone|custom, null=unassigned"
-    num  confidence "0..1"
+    real confidence "0..1"
     text flag
     text group_label
   }
@@ -616,6 +618,10 @@ class MembersRepository {
   static readonly key = "MembersRepository";
   constructor(db?: Db);
   listByGroup(userId: string, groupId: GroupId): Promise<Member[]>;
+  // Resolve the caller's own membership in a group → their group_members row (or null if not an
+  // active member). The single "userId → memberId in this group" lookup that handlers need for
+  // payer resolution (receipts), the user's net position (balances), and membership guards.
+  findMembership(userId: string, groupId: GroupId): Promise<Member | null>;
   addMember(
     userId: string,
     groupId: GroupId,

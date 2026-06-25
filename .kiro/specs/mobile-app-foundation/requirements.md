@@ -144,8 +144,10 @@ real tokens without changing call sites.
 3. WHILE no token provider is configured (this feature's default) THE SYSTEM SHALL use a
    **no-op provider** that resolves to `null`, and SHALL issue requests without an
    `Authorization` header.
-4. THE SYSTEM SHALL read the API base URL from typed Expo environment config (e.g.
-   `EXPO_PUBLIC_*`) with a sensible local default.
+4. THE SYSTEM SHALL read **both** API base URLs from typed Expo environment config
+   (`EXPO_PUBLIC_API_URL` for coreAPI and `EXPO_PUBLIC_RECEIPT_API_URL` for the separate
+   receiptServiceAPI gateway), each with a sensible local default, and build one typed treaty
+   client per service.
 5. THE SYSTEM SHALL expose the client via a React context/provider so the token provider can be
    swapped (by the auth feature) at the app root without touching call sites.
 6. IF a request returns a non-2xx response THEN THE SYSTEM SHALL surface a normalized error

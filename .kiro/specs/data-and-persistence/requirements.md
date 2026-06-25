@@ -204,7 +204,9 @@ without changing handler contracts.
 1. THE SYSTEM SHALL provide a `GroupsRepository` with `list(userId)`, `create(userId,
 input)`, and `findById(userId, id)` that hydrates the group's members.
 2. THE SYSTEM SHALL provide a `MembersRepository` with `addMember`, `listByGroup`,
-   `linkUser` (attach an account to a placeholder), and `remove`, each scoped by `userId`.
+   `findMembership` (resolve `userId` + `groupId` → the caller's `group_members` row, or null when
+   not an active member), `linkUser` (attach an account to a placeholder), and `remove`, each
+   scoped by `userId`.
 3. THE SYSTEM SHALL provide an `ExpensesRepository` with `create`, `findById` (hydrating
    items, assignments, adjustments), `listByGroup`, `updateItemAssignment`, and `finalize`,
    each scoped by `userId`.

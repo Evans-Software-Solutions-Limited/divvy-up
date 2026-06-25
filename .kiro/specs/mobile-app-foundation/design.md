@@ -190,8 +190,11 @@ import { treaty } from "@elysiajs/eden";
 import type { App } from "@divvy-up/core"; // Elysia app type export
 
 export interface ApiClientConfig {
-  baseUrl: string; // from EXPO_PUBLIC_API_URL (local default otherwise)
-  getToken: TokenProvider; // injected; defaults to noopTokenProvider
+  // The backend has TWO API Gateways (separate hosts): coreAPI (groups/expenses/balances/…) and
+  // receiptServiceAPI (capture/extract). The client builds a typed treaty per service.
+  coreBaseUrl: string; // from EXPO_PUBLIC_API_URL
+  receiptBaseUrl: string; // from EXPO_PUBLIC_RECEIPT_API_URL
+  getToken: TokenProvider; // injected; defaults to noopTokenProvider; applied to BOTH clients
 }
 
 export interface NormalizedApiError {
@@ -200,13 +203,20 @@ export interface NormalizedApiError {
   message: string; // human-readable, prod-safe
 }
 
-export type ApiClient = ReturnType<typeof treaty<App>>;
+import type { ReceiptApp } from "@divvy-up/receipt-service"; // second Elysia app type export
+
+export interface ApiClient {
+  core: ReturnType<typeof treaty<App>>; // coreAPI host
+  receipts: ReturnType<typeof treaty<ReceiptApp>>; // receiptServiceAPI host
+}
 
 export function createApiClient(config: ApiClientConfig): ApiClient;
-// - treaty() with onRequest hook that awaits getToken() and, when non-null,
-//   sets `Authorization: Bearer <token>`.
+// - builds ONE treaty per service (core → coreBaseUrl, receipts → receiptBaseUrl).
+// - both share an onRequest hook that awaits getToken() and, when non-null, sets
+//   `Authorization: Bearer <token>`.
 // - response interpreted: non-2xx -> throw NormalizedApiError so TanStack Query
 //   surfaces it as `error`.
+// Feature clients pick the surface: `useApiClient().core...` or `.receipts...`.
 ```
 
 ```ts
@@ -214,9 +224,10 @@ export function createApiClient(config: ApiClientConfig): ApiClient;
 export const ApiClientContext = createContext<ApiClient | null>(null);
 export function ApiClientProvider(props: {
   getToken?: TokenProvider; // auth feature passes the real provider here
-  baseUrl?: string;
+  coreBaseUrl?: string;
+  receiptBaseUrl?: string;
   children: ReactNode;
-}): JSX.Element; // builds the client once (useMemo) and provides it
+}): JSX.Element; // builds the { core, receipts } client once (useMemo) and provides it
 export function useApiClient(): ApiClient; // throws if used outside provider
 ```
 
@@ -228,7 +239,8 @@ site changes — this feature ships with `noopTokenProvider`.
 
 ```jsonc
 // app.json -> expo.extra / EXPO_PUBLIC_*
-EXPO_PUBLIC_API_URL = "<core api url>"  // local default e.g. http://localhost:3000
+EXPO_PUBLIC_API_URL = "<core api url>"          // coreAPI; local default e.g. http://localhost:3000
+EXPO_PUBLIC_RECEIPT_API_URL = "<receipt api url>" // receiptServiceAPI (separate gateway host)
 ```
 
 ## Error Handling
