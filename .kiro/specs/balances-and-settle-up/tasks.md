@@ -77,25 +77,29 @@
 - [ ] 15. Implement `settlementsService.record(...)`: validate non-self pair, amount > 0, both
       members in group, **correct direction** (`from` is the net debtor; reject reversed or
       already-settled pairs), and `amount ≤ live outstanding net` (recompute net in-request to
-      avoid stale overpay); persist; then append an activity entry.
-      _Requirements: 3.2, 3.4, 3.5, 3.5a, 3.6_
+      avoid stale overpay); **dedupe on the `Idempotency-Key`** (return the original settlement for a
+      repeated key — guards partial-amount double-taps); persist; then append an activity entry.
+      _Requirements: 3.2, 3.4, 3.5, 3.5a, 3.6, 3.6a_
 
 - [ ] 16. Add `settlementsHandler`: `POST /groups/:groupId/settlements` (validate body, derive
       actor from JWT, never from body) and `GET /groups/:groupId/settlements`. Reject inaccessible
       member/group. _Requirements: 3.5, 3.7, 6.2, 6.3, 6.4_
 
 - [ ] 17. Unit + handler tests: records with timestamp; rejects over-net, zero/negative,
-      self-pair, **reversed direction / already-settled pair**, non-member; appends activity;
-      membership scoping; actor from token. _Requirements: 3.2, 3.5, 3.5a, 3.6, 3.7, 6.4_
+      self-pair, **reversed direction / already-settled pair**, non-member; **repeated
+      `Idempotency-Key` records once** (partial-amount double-tap); appends activity; membership
+      scoping; actor from token. _Requirements: 3.2, 3.5, 3.5a, 3.6, 3.6a, 3.7, 6.4_
 
 ## Phase 5 — Activity repository + handler
 
 - [ ] 18. Implement `ActivityRepository` (`microservices/core/src/application/activity/`)
       against `packages/db` `activity` table: `append`, `listByUser` (all groups), `listByGroup`,
-      newest-first. _Requirements: 5.2, 5.3, 5.4_
+      newest-first, **paginated** (`limit` default+cap, `before` createdAt cursor — never return the
+      whole feed). _Requirements: 5.2, 5.3, 5.4_
 
 - [ ] 19. Emit activity entries at the source events using the canonical `activity_kind` enum:
-      `expense_added` on finalize (the expense becomes part of balances), `member_added` on join
+      `expense_added` **only on the actual `draft→finalized` transition** (not on idempotent
+      re-finalize — guard on the prior status so the feed isn't duplicated), `member_added` on join
       (hook into the existing finalize and groups/members flows), and `settled_up` from the
       settlements service (task 15). _Requirements: 5.1, 5.5_
 

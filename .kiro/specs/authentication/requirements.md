@@ -198,8 +198,10 @@ protected data is never served to an unverified caller.
 
 1. IF a protected route is called with no `Authorization` header THEN THE SYSTEM SHALL respond
    `401 Unauthorized` and SHALL NOT execute the handler.
-2. IF the bearer token is malformed, has an invalid signature, or is expired THEN THE SYSTEM
-   SHALL respond `401 Unauthorized`.
+2. IF the bearer token is malformed, has an invalid signature, is expired, or **fails `aud`/`iss`
+   validation** (audience not `authenticated`, or issuer not this project's
+   `${SUPABASE_URL}/auth/v1`) THEN THE SYSTEM SHALL respond `401 Unauthorized`. Verifying the
+   signature and `exp` alone is insufficient.
 3. WHEN the API responds `401` THE SYSTEM SHALL return a structured JSON body
    (`{ message: "Unauthorized" }`) consistent with the global error handler shape.
 4. WHILE handling an authenticated request THE SYSTEM SHALL guarantee that `requireAuth` has run

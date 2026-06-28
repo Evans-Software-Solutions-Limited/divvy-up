@@ -71,6 +71,8 @@ flowchart TD
   `ConfidenceSummary`, the scrollable `ItemRow` list (tinted by assigned person colour), the
   `AdjustmentsBlock`, the `LiveSplitBar` footer, and the receipt-thumbnail button that opens
   `HowAIReadSheet`. Holds a ref list of rows so the summary can scroll-to-first-flagged.
+  Items that share a `group_label` (e.g. "The wine round" — extracted + stored by #6) render under
+  a lightweight group header, matching the prototype's grouping; ungrouped items render flat.
   _Requirements: 1, 3, 4, 5, 6, 9_
 - **`ItemRow`** — description / qty / line amount / assignment badge; amber left-accent + "check this"
   when flagged or unassigned; opens `ItemEditorSheet` on tap. _Requirements: 1.2, 1.3, 3.2_
@@ -159,7 +161,9 @@ Body: _none_. The handler **derives the group's current member list server-side*
 client never supplies `memberIds` (it could be stale/forged and would silently change the split).
 → `200 { expense: Expense; balances: Balance[] }` · `403` · `404` ·
 `422 { error, unassignedItemIds: string[] }` (items still unassigned).
-Idempotent: re-finalizing a finalized expense returns the same `{ expense, balances }`.
+Idempotent: re-finalizing a finalized expense returns the same `{ expense, balances }` **and emits
+no new activity** — the `expense_added` feed entry fires only on the actual `draft → finalized`
+transition, so a repeated finalize never duplicates it.
 `Balance` is the domain type `{ groupId, fromMemberId, toMemberId, amount }` (amount = pence,
 `from` owes `to`).
 

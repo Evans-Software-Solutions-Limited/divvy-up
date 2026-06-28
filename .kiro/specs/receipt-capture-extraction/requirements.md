@@ -30,7 +30,8 @@ surfaced, never silently guessed. Currency is **GBP** for V1.
 
 - **Draft expense** — an `Expense` row with `status = 'draft'`, created from an extraction so the
   user can review and assign before finalizing.
-- **Per-item confidence** — a float `0..1` the model attaches to each line item; `< 0.7` is
+- **Per-item confidence** — a float `0..1` the model attaches to each line item; below
+  `FLAG_CONFIDENCE_THRESHOLD` (the `0.7` constant exported by `split-engine`, not re-hardcoded) is
   treated as "needs a quick check" (the amber flag threshold, matching the prototype).
 - **Adjustment** — a receipt-level charge/discount (service charge, tip, tax, discount) that
   affects the total and is later apportioned pro-rata by the split engine.
@@ -180,7 +181,8 @@ totals before adjustments), `adjustmentsTotal`, and `printedTotal` as printed.
 SYSTEM SHALL still return the values it read, set a top-level `reconciled: false`, and SHALL NOT
 silently alter amounts to force a match.
 
-5.8. THE SYSTEM SHALL attach `confidence < 0.7` and/or a `flagReason` to any item it is unsure
+5.8. THE SYSTEM SHALL attach a `confidence` below `FLAG_CONFIDENCE_THRESHOLD` (the shared `0.7`
+constant) and/or a `flagReason` to any item it is unsure
 about (e.g. ambiguous quantity, unreadable price), so the Review feature can render the amber
 "check this" flag and the "N items need a quick check" summary.
 

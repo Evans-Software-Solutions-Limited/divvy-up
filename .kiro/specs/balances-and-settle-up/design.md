@@ -160,6 +160,7 @@ type BalancesResponse = {
 };
 
 // POST /groups/:groupId/settlements   (record-keeping only — no money moves)
+//   Header: `Idempotency-Key: <uuid>` — repeated key returns the original settlement (no dupe).
 type CreateSettlementBody = {
   fromMemberId: string; // the debtor (who "paid")
   toMemberId: string; // the creditor
@@ -176,8 +177,12 @@ type Settlement = {
 
 // GET /groups/:groupId/settlements -> Settlement[]
 
-// GET /activity            (all the user's groups)
-// GET /groups/:groupId/activity   (one group)
+// GET /activity?limit=&before=            (all the user's groups)
+// GET /groups/:groupId/activity?limit=&before=   (one group)
+//   Paginated: `limit` (default 30, capped e.g. 100), `before` = createdAt cursor of the last
+//   row seen. The activity feed grows unbounded over a group's lifetime, so it is NEVER returned
+//   whole. (The settlements/groups/members list endpoints are bounded by group size for V1, but
+//   should adopt the same `limit`/`before` shape if any can grow large.)
 type ActivityEntry = {
   id: string;
   kind: "expense_added" | "settled_up" | "member_added";
@@ -206,8 +211,12 @@ Uses the global structured error handler (request-id correlation, prod-safe stac
   from the body (Req 6.4).
 - **Empty / all-settled** — not an error: balances return `allSettled: true` with empty lists;
   activity returns `[]`.
-- **Idempotency note** — settlements are append-only events; a duplicate submit would record a
-  second settlement, but the `amount ≤ outstanding net` check prevents driving a pair negative.
+- **Idempotency** — settlements are append-only, so a double-submit is a real risk. The
+  `amount ≤ outstanding net` check only prevents going _negative_ — it does **not** stop a
+  double-tap of a **partial** amount (e.g. £5 of a £10 debt recorded twice = £10, over-settling).
+  The client therefore sends an **`Idempotency-Key`** header (a per-action UUID); the handler
+  dedupes within a short window (returns the original settlement for a repeated key) so retries and
+  double-taps record exactly one settlement.
 
 ## Testing Strategy
 

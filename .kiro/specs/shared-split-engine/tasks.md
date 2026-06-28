@@ -32,7 +32,8 @@ backend integration. Mobile consumes the same package via the contract.
   - Port the item loop (`price * (qty||1)`, four modes, unassigned handling, `sharesByItem`) and
     the pro-rata adjustment loop (percent on items subtotal, fixed, discount negative, pro-rata by
     current share via `splitPence`, equal fallback when no positive shares). Compute
-    `itemsSubtotal`, `assignedSubtotal`, `adjustmentsTotal`, `total`, `flagged` (`conf < 0.7`).
+    `itemsSubtotal`, `assignedSubtotal`, `adjustmentsTotal`, `total`, `flagged`
+    (`conf < FLAG_CONFIDENCE_THRESHOLD`); export `FLAG_CONFIDENCE_THRESHOLD = 0.7` for #6/#7 to reuse.
   - Tests (`__tests__/computeSplit.test.ts`): each of the four modes in isolation; qty handling;
     unassigned accumulation; mixed percent+fixed+discount adjustments with pro-rata weighting;
     all-unassigned equal fallback; `flagged` counting (ignores missing `conf`, never alters money).

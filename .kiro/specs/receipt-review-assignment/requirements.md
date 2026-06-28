@@ -36,6 +36,9 @@ it's currently assigned to, so that I can confirm the AI got it right before sav
    with the receipt total in `£x.xx`, the merchant name (when present), and the date.
 2. THE SYSTEM SHALL render one row per receipt item showing its description, quantity, line amount
    (`unitPrice × quantity` formatted to `£x.xx`), and the current assignment summary.
+   2a. WHERE items carry a `group_label` (e.g. "The wine round", extracted and stored by #6) THE
+   SYSTEM SHALL render those items under a group header (matching the prototype's grouping) rather
+   than ignoring the label; ungrouped items render flat.
 3. WHERE an item is assigned, THE SYSTEM SHALL tint that row (left accent / badge) in the assigned
    person's people-palette colour; WHERE an item is split across multiple people THE SYSTEM SHALL
    indicate the multi-person assignment using their colours/initials.

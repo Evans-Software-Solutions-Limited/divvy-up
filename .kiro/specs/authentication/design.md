@@ -147,6 +147,13 @@ function getJwks() {
   /* build from SUPABASE_URL/auth/v1/.well-known/jwks.json, memoize */
 }
 
+// getAuthUser MUST verify claims, not just the signature:
+//   jwtVerify(token, getJwks(), {
+//     issuer: `${SUPABASE_URL}/auth/v1`,   // reject tokens from another project
+//     audience: "authenticated",            // reject non-authenticated/service tokens
+//   })
+// Signature + `exp` alone are insufficient — `aud`/`iss` must be asserted.
+
 // Returns verified claims, or null on missing/invalid token.
 export async function getAuthUser(
   authHeader: string | undefined,

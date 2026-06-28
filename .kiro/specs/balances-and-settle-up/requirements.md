@@ -101,6 +101,9 @@ we squared up outside the app.
    flip one.
 6. WHEN a settlement is recorded THE SYSTEM SHALL also append a corresponding activity-feed
    entry (see Requirement 5).
+   6a. THE SYSTEM SHALL make settlement recording **idempotent** against double-submit: the client
+   supplies an `Idempotency-Key`, and a repeated key SHALL return the original settlement without
+   recording a second one (the `amount ≤ net` cap does not stop a partial-amount double-tap).
 7. THE SYSTEM SHALL allow recording a settlement only between two members of a group the
    authenticated user belongs to.
 
@@ -130,7 +133,8 @@ up with new expenses, settlements, and people joining.
 2. THE SYSTEM SHALL store each entry with a type, the acting member, a group reference, an
    optional pence amount, and a creation timestamp.
 3. WHEN the activity feed is requested THE SYSTEM SHALL return entries in **reverse
-   chronological order** (newest first).
+   chronological order** (newest first), **paginated** with a `limit` (sensible default + cap) and
+   a `before` cursor — the feed grows unbounded over time and SHALL NOT be returned in full.
 4. WHERE the feed is shown on Home THE SYSTEM SHALL include entries across **all** the user's
    groups; WHERE shown on a group screen THE SYSTEM SHALL include only that group's entries.
 5. WHERE an entry is a settlement THE SYSTEM SHALL mark it as settled and render it with the

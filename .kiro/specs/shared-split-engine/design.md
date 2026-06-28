@@ -190,8 +190,12 @@ export interface SplitResult {
   assignedSubtotal: number; // itemsSubtotal - unassigned
   adjustmentsTotal: number; // signed sum of adjustment amounts
   total: number; // itemsSubtotal + adjustmentsTotal
-  flagged: number; // count of items with conf != null && conf < 0.7
+  flagged: number; // count of items with conf != null && conf < FLAG_CONFIDENCE_THRESHOLD
 }
+
+// Single source of truth for the "needs a quick check" cutoff. Exported so extraction (#6) and
+// the review UI (#7) import it instead of re-hardcoding `0.7` (which would drift).
+export const FLAG_CONFIDENCE_THRESHOLD = 0.7;
 ```
 
 ### Relationship to `microservices/core` domain types
@@ -336,7 +340,8 @@ Vitest with v8 coverage at the repo threshold (90%, per `steering/tech.md`). Tes
 - Mixed adjustments: percent (on items subtotal) + fixed + discount together; assert
   `adjByPerson`, `adjustmentsTotal`, `total`, and pro-rata weighting by current share.
 - All-unassigned + adjustment → equal fallback across `memberIds`.
-- `flagged`: counts `conf < 0.7`, ignores missing `conf`, never alters money.
+- `flagged`: counts `conf < FLAG_CONFIDENCE_THRESHOLD` (the exported `0.7` constant), ignores
+  missing `conf`, never alters money.
 
 ### Property-based sum invariant (the keystone)
 

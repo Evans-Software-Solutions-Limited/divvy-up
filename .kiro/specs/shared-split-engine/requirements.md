@@ -160,7 +160,8 @@ finalize.
 #### Acceptance Criteria
 
 1. THE SYSTEM SHALL count, as `flagged`, the items whose confidence (`conf`) is present and below
-   the low-confidence threshold (`< 0.7`, matching the prototype).
+   the low-confidence threshold — the **exported `FLAG_CONFIDENCE_THRESHOLD` constant** (`0.7`,
+   matching the prototype), which #6 and #7 import rather than re-hardcoding.
 2. WHERE an item has no confidence value THE SYSTEM SHALL NOT count it as flagged.
 3. THE SYSTEM SHALL return `flagged` as part of the `SplitResult` without altering any monetary
    field.
