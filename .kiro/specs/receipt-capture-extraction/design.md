@@ -107,7 +107,7 @@ Layering matches `microservices/core` (handler thin → service → repositories
 | `receiptExtractHandler`          | `POST /receipts/extract` (rewritten). Validates body, asserts membership + key ownership, calls `ReceiptExtractService`, maps `Result` → HTTP.                                                                                                    |
 | `ReceiptExtractService`          | Domain orchestration: fetch object → call `ExtractionProvider` → normalize to the contract (pence, clamp confidence to `0..1`, compute `subtotal`/`reconciled`) → persist draft in one tx → return contract + `draftExpenseId`.                   |
 | `ExtractionProvider` (interface) | `extract(image: Bytes, hint): Promise<Result<RawExtraction, ExtractError>>`. Two impls: `TextractExtractionProvider` **or** `ClaudeVisionExtractionProvider` (chosen by config/secret), plus `FixtureExtractionProvider` for deterministic tests. |
-| `ReceiptStorageRepository`       | S3 access: presign PUT, `getObject(key)`, key minting/validation (`receipts/{userId}/{groupId}/{uuid}.jpg`). Wraps the `infra/storage.ts` bucket binding.                                                                                         |
+| `ReceiptStorageRepository`       | S3 access: presign PUT, `getObject(key)`, `deleteObjects(keys)`, key minting/validation (`receipts/{userId}/{groupId}/{uuid}.jpg`). Wraps the `infra/storage.ts` bucket binding.                                                                  |
 | `DraftExpenseRepository`         | Persists draft expense + items + adjustments via `packages/db` in a transaction; scoped to user + group (Req 7). Owned conceptually by `data-and-persistence`; this feature adds the draft-from-extraction write path.                            |
 
 `ExtractionProvider` is the seam that keeps vision deterministic in tests (see Testing Strategy)
@@ -215,6 +215,20 @@ Mapping note: the prototype's `item.conf` → `confidence`, `item.flag` → `fla
 `is_percent = true` + `amount` in basis points (not resolved to pence at extraction) — so storage
 matches the #7 edit contract and the split engine, and the user can later change the rate.
 
+### Receipt-image lifecycle (avoiding orphaned PII)
+
+Receipt images are **PII** and have **no FK to S3** — the DB cascade that removes an `expenses`
+row (and its `receipt_image_key`) does **not** delete the S3 object. To avoid orphaned images
+(privacy + storage cost):
+
+- WHEN an expense (or a group, which cascades to its expenses) is deleted, the delete path SHALL
+  collect the affected `receipt_image_key`s and call `ReceiptStorageRepository.deleteObjects(...)`.
+  This is a cross-feature responsibility: the deleting handler (groups/expenses) invokes the
+  storage repo owned here.
+- The bucket SHALL carry an **S3 lifecycle rule** that expires objects under `receipts/` whose
+  draft was never finalized after N days, as a backstop for abandoned scans (declared in
+  `infra/storage.ts`).
+
 ## API Contract
 
 Both endpoints live on `receiptServiceAPI` (`infra/api.ts`) and are exported through the Elysia
@@ -256,6 +270,8 @@ Fallback (presign disabled): `POST /receipts/upload` multipart `{ groupId, file 
 //   401 unauthenticated
 //   403 not a group member, or key not owned by this user/group
 //   404 receiptImageKey has no S3 object
+//   413 fetched object exceeds the max size (presigned PUT can't cap it)
+//   415 fetched object is not a supported image (magic-number sniff)
 //   422 image fetched but provider could not process it as an image
 //   504 extraction provider timed out (client offers retry / manual)
 ```
@@ -276,6 +292,19 @@ groupId)` → the `group_members.id`. The creator is the default payer (single-p
 3. If the user is not an active member of `groupId` → `403` and persist nothing.
 4. Use that `group_members.id` as `payer_member_id` when `DraftExpenseRepository` writes the draft.
 
+### Server-side upload validation (a presigned PUT can't enforce it)
+
+The client downscales before upload (Req 1.5/2.5), but a **presigned PUT cannot bound object size**
+and only weakly binds content-type, so client-side limits are not a security/cost control. The
+backend therefore validates the object **after** fetching it, before sending it to the (expensive)
+vision provider:
+
+1. On `GetObject`, check `ContentLength` ≤ a configured max (e.g. ~10 MB) → reject `413` if over.
+2. Verify the bytes are a supported image (magic-number sniff, not just the S3 content-type) →
+   reject `415` if not.
+3. Only then call extraction. (Alternatively the upload endpoint may mint a **presigned POST** with
+   a `content-length-range` condition; `/extract` still validates as defence-in-depth.)
+
 ## Error Handling
 
 | Failure                                   | Where                                  | Behavior                                                                                 |
@@ -285,6 +314,8 @@ groupId)` → the `group_members.id`. The creator is the default payer (single-p
 | Upload network error / timeout            | `useReceiptUpload`                     | Retry affordance + cancel; do not call `/extract` (Req 3.4).                             |
 | `receiptImageKey` not owned by user/group | `/extract` 403                         | Reject; persist nothing (Req 3.6, 7.6).                                                  |
 | S3 object missing                         | `/extract` 404                         | Reject; client re-uploads.                                                               |
+| Uploaded object over max size             | `/extract` 413                         | Reject before calling the vision provider (presigned PUT can't cap size).                |
+| Uploaded object not a supported image     | `/extract` 415                         | Magic-number sniff after `GetObject`; reject before extraction.                          |
 | Provider can't read it as a receipt       | service → `outcome:"unreadable"` (200) | Honest `unreadable` payload + reason; **no fabricated items, no draft** (Req 6.1, 6.2).  |
 | Partial read                              | service → `partial:true`               | Return read items with low `confidence`/`flagReason`; persist what was read (Req 6.3).   |
 | Subtotal+adjustments ≠ printed total      | service → `reconciled:false`           | Return as-read; never silently adjust amounts (Req 5.7).                                 |

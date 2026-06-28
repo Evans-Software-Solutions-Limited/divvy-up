@@ -114,6 +114,12 @@ to the extraction request; the raw image bytes SHALL NOT be sent to the extract 
 3.6. THE SYSTEM SHALL scope every upload target and key to the authenticated user and a group
 they belong to, rejecting requests for groups the user is not a member of.
 
+3.7. Because a presigned PUT cannot bound object size or reliably enforce content-type, THE SYSTEM
+SHALL validate the uploaded object **server-side** before extraction: WHEN the fetched object
+exceeds the configured maximum size THE SYSTEM SHALL reject with `413`, and IF the bytes are not a
+supported image (verified by content sniffing, not the client-declared type) THEN THE SYSTEM SHALL
+reject with `415` — in both cases without calling the vision provider or persisting a draft.
+
 ## Requirement 4 — AI processing screen with honest progress
 
 **User Story:** As a user, I want to see what the AI is doing while it reads my receipt, so that
@@ -237,3 +243,8 @@ nothing.
 
 7.7. IF persistence fails after a successful extraction THEN THE SYSTEM SHALL return an error the
 client can retry, and SHALL NOT leave a partially-written draft (the write is one transaction).
+
+7.8. Because receipt images are PII with **no FK to S3**, WHEN an expense or its group is deleted
+THE SYSTEM SHALL delete the associated S3 object(s) (the deleting handler calls the storage repo's
+delete; the DB cascade alone does not remove S3 objects), and THE SYSTEM SHALL declare an S3
+lifecycle rule that expires never-finalized receipt objects after a configured retention period.

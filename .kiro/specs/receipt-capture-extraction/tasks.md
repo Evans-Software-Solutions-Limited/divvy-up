@@ -77,17 +77,18 @@
 
 - [ ] **9. S3 receipts bucket**
       Add `infra/storage.ts` with an `sst.aws.Bucket` for receipt images; link it to
-      `receiptServiceAPI` in `infra/api.ts`. Configure private access (no public read). Reference it
-      from `sst.config.ts`.
-      _Requirements: 3.1, 3.2, 7.4_
+      `receiptServiceAPI` in `infra/api.ts`. Configure private access (no public read). Add an **S3
+      lifecycle rule** expiring `receipts/` objects after a configured retention period (backstop
+      for abandoned, never-finalized scans). Reference it from `sst.config.ts`.
+      _Requirements: 3.1, 3.2, 7.4, 7.8_
 
 - [ ] **10. ReceiptStorageRepository + presign endpoint**
       Add `ReceiptStorageRepository` (key minting `receipts/{userId}/{groupId}/{uuid}.jpg`, presign
-      PUT, `getObject`, key-ownership validation) and `receiptUploadHandler`
+      PUT, `getObject`, `deleteObjects(keys)`, key-ownership validation) and `receiptUploadHandler`
       (`POST /receipts/upload-url`, plus the `/receipts/upload` multipart proxy fallback). Assert JWT
       auth + group membership; reject non-members (403). Tests: key namespacing, membership guard,
-      presign response shape.
-      _Requirements: 3.1, 3.2, 3.6, 7.6_
+      presign response shape, delete removes objects.
+      _Requirements: 3.1, 3.2, 3.6, 7.6, 7.8_
 
 ## Phase 3 — Real extraction with confidence (backend)
 

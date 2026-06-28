@@ -55,11 +55,14 @@ assignedSubtotal + adjustmentsTotal`; every money value is an integer; `computeS
 - [ ] **7. Implement `balancesFromExpense` (`src/balancesFromExpense.ts`) + tests**
   - Map `Expense` → `SplitInput` per the `design.md` mapping tables (assignment + adjustment
     conversion, `unitPrice→price`, `quantity→qty`, `CustomShare.weight` → `{id: weight}`), run
-    `computeSplit`, drop the payer, and emit one `Balance` per non-payer with a non-zero net
-    (`fromMemberId`=member, `toMemberId`=payerId, `groupId`, integer `amount`).
+    `computeSplit`, drop the payer, and emit one `Balance` per non-payer with a non-zero net.
+    **Direction follows the net's sign**: positive → `{from: member, to: payerId}`; negative
+    (over-discount) → `{from: payerId, to: member}`; `amount` is always the absolute pence value
+    (never negative); plus `groupId`.
   - Tests (`__tests__/balancesFromExpense.test.ts`): parity with a hand-built `SplitInput`; payer
-    excluded; zero-net excluded; adjustments flow into balances; `everyone` resolved via
-    `memberIds` and empty `memberIds` charges nobody; returned balances sum to total owed to payer.
+    excluded; zero-net excluded; adjustments flow into balances; **over-discount → reversed
+    direction with positive amount (payer owes member)**; `everyone` resolved via `memberIds` and
+    empty `memberIds` charges nobody; returned balances sum to total owed to payer.
   - Export from `index.ts`.
   - _Requirements: 6.1–6.6, 7.1, 7.2_
 

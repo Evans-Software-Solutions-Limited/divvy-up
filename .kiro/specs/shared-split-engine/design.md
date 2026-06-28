@@ -140,8 +140,13 @@ It applies:
 
 `balancesFromExpense` is then just `toSplitInput` → `computeSplit` → drop payer → emit `Balance[]`.
 
-Then it runs `computeSplit`, drops the payer, and emits `Balance` rows for non-payers whose
-`perPerson` value is non-zero.
+Then it runs `computeSplit`, drops the payer, and emits a `Balance` for every non-payer whose
+`perPerson` value is non-zero. **Direction follows the sign** of that value: when `perPerson[m] > 0`
+the member owes the payer → `{ from: m, to: payerId, amount: perPerson[m] }`; when `perPerson[m] < 0`
+(an over-discount made the member's net negative, so the **payer owes the member**) →
+`{ from: payerId, to: m, amount: -perPerson[m] }`. `amount` is therefore always positive and
+`from` is always the debtor — never a negative `amount`. (Over-discount is rare but legal: a voucher
+or discount exceeding the assigned subtotal drives every share negative.)
 
 ## Data Models
 

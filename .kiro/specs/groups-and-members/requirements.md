@@ -107,7 +107,9 @@ so that it stays recognisable as its purpose evolves.
    and reflect it on Home, the Groups list and the group detail.
 3. IF a non-owner attempts to rename, re-cover or delete the group THEN THE SYSTEM SHALL reject the
    request with an authorization error.
-4. WHEN the owner deletes a group THE SYSTEM SHALL require an explicit confirmation before removing it.
+4. WHEN the owner deletes a group THE SYSTEM SHALL require an explicit confirmation before removing
+   it, and SHALL delete the group's expenses' **receipt images from S3** (via the storage repo from
+   `receipt-capture-extraction` — the DB cascade does not reach S3; see that spec's Req 7.8).
 5. IF the user is not a member of the group THEN THE SYSTEM SHALL reject any read or write to it with
    a not-found / not-authorized error (membership scoping).
 

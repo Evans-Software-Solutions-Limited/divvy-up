@@ -178,9 +178,12 @@ mobile preview used — replacing the divergent `computeBalances`.
 1. THE SYSTEM SHALL expose a function that accepts a finalized `Expense` (single payer, items,
    adjustments) and the group's full `memberIds`, adapts them to the engine's input shape, runs
    `computeSplit`, and returns one `Balance` per **non-payer** member with a non-zero net amount.
-2. THE SYSTEM SHALL set, on each returned balance, `fromMemberId` = the owing member,
-   `toMemberId` = `expense.payerId`, `groupId` = `expense.groupId`, and `amount` = that member's
-   net share (item shares plus their pro-rata adjustments) in pence.
+2. THE SYSTEM SHALL set each returned balance's direction by the **sign** of the member's net
+   share: WHEN the net is positive the member owes the payer (`fromMemberId` = member,
+   `toMemberId` = `expense.payerId`); IF the net is negative (an over-discount left the payer owing
+   the member) THEN `fromMemberId` = `expense.payerId` and `toMemberId` = member. In both cases
+   `amount` = the **absolute** net in pence (always positive) and `groupId` = `expense.groupId`.
+   The SYSTEM SHALL never emit a negative `amount`.
 3. WHERE `expense.payerId` itself holds a share THE SYSTEM SHALL exclude the payer from the
    returned balances (the payer does not owe themselves).
 4. WHEN the expense includes `everyone` assignments THE SYSTEM SHALL resolve them against the

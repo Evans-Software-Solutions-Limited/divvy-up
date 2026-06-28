@@ -171,7 +171,8 @@ POST   /groups                      { name; emoji?; coverIndex?;
                                     → 201 GroupDetail                            // Req 2
 GET    /groups/:id                  → 200 GroupDetail | 404                      // Req 1.8, 7
 PATCH  /groups/:id                  { name?; emoji?; coverIndex? } → 200 GroupDetail // Req 3 (owner)
-DELETE /groups/:id                  → 204 | 403 | 404                            // Req 3.3, 3.4
+DELETE /groups/:id                  → 204 | 403 | 404   // Req 3.3, 3.4; also deletes the group's
+                                    //   expenses' S3 receipt images (receipt-capture Req 7.8)
 
 // ── Members ──
 GET    /groups/:id/members          → 200 Member[]                              // Req 4
