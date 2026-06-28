@@ -65,7 +65,7 @@
     `amount` integer (bps if percent else pence; discounts negative), `label`.
   - `settlements`: group/from/to member FKs, `amount` integer pence, `recorded_by`,
     timestamp; `from <> to` CHECK; **no money-movement fields**.
-  - `activity`: group FK, optional actor member, `kind` enum, `text`, optional `amount`
+  - `activity`: group FK, **required** actor member (`not null`, `restrict`), `kind` enum, `text`, optional `amount`
     pence, optional `expense_id`/`settlement_id`, timestamp; `(group_id, created_at)` index.
   - Add Drizzle `relations()` and `$inferSelect`/`$inferInsert` type exports for all tables.
   - _Requirements: 4.6, 4.7, 4.8, 4.9, 4.11, 5.1, 5.2, 5.5, 5.6, 6.3, 6.4, 6.5_

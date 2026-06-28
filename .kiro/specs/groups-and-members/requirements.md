@@ -174,7 +174,10 @@ existing identity.
 3. WHEN an authenticated user opens a valid invite and accepts THE SYSTEM SHALL add them to the group:
    IF the invite is bound to a placeholder member THEN THE SYSTEM SHALL link that member row to the
    accepting user (`user_id` set, `placeholder` false) preserving its `colour_index`, initials and
-   history; OTHERWISE THE SYSTEM SHALL create a new account-linked member with a non-clashing colour.
+   history; ELSE IF a (possibly inactive) membership already exists for this user in the group THEN
+   THE SYSTEM SHALL **reactivate** that row (`active` true) preserving its colour/history rather than
+   inserting a duplicate (which the `(group_id, user_id)` unique index would reject); OTHERWISE THE
+   SYSTEM SHALL create a new account-linked member with a non-clashing colour.
 4. IF an invite token is expired, already used, or invalid THEN THE SYSTEM SHALL reject acceptance
    with a clear, distinguishable error for each case and SHALL NOT modify the group.
 5. IF the accepting user is already a member of the group THEN THE SYSTEM SHALL treat acceptance as a

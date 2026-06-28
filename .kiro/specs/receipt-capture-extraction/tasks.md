@@ -38,6 +38,12 @@
       including denial (explanatory state + settings link + import alternative). On capture, run
       `prepareImage` and advance to upload. Tests: permission granted/denied, torch toggle, capture
       advances.
+      **Add the platform permission usage-description strings now** (this feature introduces the
+      camera/photo APIs — iOS terminates an app that requests them without these): in
+      `packages/mobile/app.config.ts` set `NSCameraUsageDescription` + `NSPhotoLibraryUsageDescription`
+      (receipt-scanning copy) and the Android `CAMERA` / media permissions (via the expo-camera /
+      expo-image-picker config plugins). `production-readiness` (#9) only **audits** these for store
+      submission; it does not introduce them.
       _Requirements: 1.1, 1.2, 1.3, 1.4, 1.6_
 
 - [ ] **5. Photo-library import**
@@ -112,7 +118,8 @@
 
 - [ ] **14. DraftExpenseRepository (packages/db)**
       Add the draft-from-extraction write path: insert a `draft` `expenses` row
-      (`status='draft'`, `currency='GBP'`, `merchant`, `receipt_image_key`,
+      (`status='draft'`, `currency='GBP'`, `merchant`, `receipt_image_key`, `date` =
+      extracted date **or today when null** (the column is NOT NULL),
       `payer_member_id` = the creator's group membership) plus `receipt_items` (with
       `confidence`/`flag`/`sort_order`, **no assignment**) and `receipt_adjustments`
       (`kind`/`is_percent`/`amount`/`label`), **in one transaction**, scoped to user + group. Tests:

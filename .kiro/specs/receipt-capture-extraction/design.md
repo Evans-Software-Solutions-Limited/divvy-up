@@ -162,7 +162,7 @@ export interface ExtractionResult {
   receiptImageKey: string;
   currency: Currency; // "GBP"
   merchant: string | null; // null, never fabricated (Req 5.4)
-  date: string | null; // ISO yyyy-mm-dd if read, else null
+  date: string | null; // ISO yyyy-mm-dd if read, else null (the contract may report "unknown")
   items: ExtractedItem[]; // unassigned
   adjustments: ExtractedAdjustment[];
   // The three totals below are DERIVED (not persisted) — convenience for the processing screen
@@ -197,7 +197,10 @@ This feature **does not invent** tables — it writes into the canonical schema 
 this section was reconciled to it). The columns it writes:
 
 - `expenses` — `status` (`draft`), `currency` (`'GBP'`), `merchant`, **`receipt_image_key`**,
-  `group_id`, **`payer_member_id`**, `created_by`. (No stored totals/`reconciled` column — those
+  `group_id`, **`payer_member_id`**, `created_by`, and `date`. Because `expenses.date` is
+  **`NOT NULL`** but the extracted `date` may be null (OCR couldn't read it), the writer
+  **coalesces a null date to today** (the user can correct it in Review #7). (No stored
+  totals/`reconciled` column — those
   are derived; see the result fields above.)
 - `receipt_items` — `id`, `expense_id`, `description`, `quantity`, **`unit_price`** (pence),
   `confidence` (numeric 0..1), **`flag`** (nullable text), `group_label`, **`sort_order`** (order).

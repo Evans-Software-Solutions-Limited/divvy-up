@@ -10,8 +10,10 @@
   - Create `microservices/core/src/shared/errorHandler.ts` exporting `coreErrorHandler`
     (`new Elysia({ name: "core-error-handler" }).onError({ as: "global" }, …)`): build the
     `{ code, error, detail, validation?, requestId?, stack? }` body, `mapStatus` (VALIDATION→422,
-    NOT_FOUND→404, PARSE→400, `AppError`→its status, else→500), read `x-amz-request-id` for
-    `requestId`, and emit the `[api:error] <METHOD> <PATH> → <STATUS> · <json>` log line.
+    NOT_FOUND→404, PARSE→400, `AppError`→its status, else→500), read `requestId` from the API
+    Gateway request context (`requestContext.requestId`, with the `x-amzn-trace-id` header as
+    fallback — NOT a nonexistent `x-amz-request-id` header), and emit the
+    `[api:error] <METHOD> <PATH> → <STATUS> · <json>` log line.
   - _Requirements: 1.1, 1.2, 1.3, 1.4, 1.5, 1.6, 2.1, 2.2, 2.3_
 
 - [ ] 2. Make the error handler production-safe and wire it into the `core` app
@@ -100,9 +102,11 @@ production` before `sst deploy`; keep the trigger on `release: published` so the
   - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.5, 9.6_
 
 - [ ] 13. Add store-submission assets, metadata, and the readiness checklist
-  - Add app icon + splash/adaptive assets and wire them, the iOS/Android usage-description /
-    permission strings for camera + photos (receipt-scanning copy), bundle id/package, version, and
-    the App Store Connect app id / Apple team id in `packages/mobile/app.config.ts`.
+  - Add app icon + splash/adaptive assets and wire them, bundle id/package, version, and the App
+    Store Connect app id / Apple team id in `packages/mobile/app.config.ts`. **Verify** the
+    camera + photo usage-description / permission strings are present (they are introduced by
+    feature #6 when the camera/photo APIs ship — this task audits them for store submission, not
+    re-adds them).
   - Add a privacy-policy reference + data-collection disclosure (App Privacy / Play Data Safety).
   - Create `docs/store-submission-checklist.md` enumerating all R10 prerequisites for a release
     manager to verify before submitting.

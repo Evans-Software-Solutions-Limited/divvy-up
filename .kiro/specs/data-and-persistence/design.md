@@ -296,7 +296,7 @@ export const expenses = pgTable(
       .notNull()
       .references(() => groupMembers.id, { onDelete: "restrict" }),
     description: text("description").notNull(),
-    date: date("date").notNull(),
+    date: date("date").notNull(), // receipt date; writers coalesce an unknown date → today (NOT NULL)
     status: expenseStatus("status").notNull().default("draft"),
     receiptImageKey: text("receipt_image_key"), // S3 key, nullable (manual expense)
     merchant: text("merchant"),
@@ -440,9 +440,11 @@ export const activity = pgTable(
     groupId: uuid("group_id")
       .notNull()
       .references(() => groups.id, { onDelete: "cascade" }),
-    actorMemberId: uuid("actor_member_id").references(() => groupMembers.id, {
-      onDelete: "set null",
-    }),
+    // actor is always known at creation (wire type requires it); members are soft-deleted
+    // (active=false), not hard-deleted, so `restrict` is consistent with expenses/settlements.
+    actorMemberId: uuid("actor_member_id")
+      .notNull()
+      .references(() => groupMembers.id, { onDelete: "restrict" }),
     kind: activityKind("kind").notNull(),
     text: text("text").notNull(),
     amount: integer("amount"), // PENCE, nullable
@@ -576,7 +578,11 @@ erDiagram
   without rewriting any expense/assignment rows.
 - **Membership uniqueness** is a partial unique index over `(group_id, user_id)` that only
   applies where `user_id is not null` — two placeholders named "Sam" are allowed; the same
-  account joined twice is not.
+  account joined twice is not. **Re-adding a removed account:** because soft-delete sets
+  `active = false` but **keeps `user_id`**, a previously-removed member still occupies the
+  unique slot. `addMember` / invite-accept therefore **reactivate the existing row**
+  (`active = true`, refresh `name`/colour as needed) when a row for `(group_id, user_id)`
+  already exists, rather than inserting a duplicate (which would violate the index).
 - **Assignment modes:** the item's `assignment_mode` lives on `receipt_items` (null =
   unassigned). `one` (1 row), `equal` (N rows, `share_weight = null`), and `custom` (N rows with a
   **positive integer `share_weight`**) record their member lists in `item_assignments`.
@@ -683,7 +689,7 @@ class ActivityRepository {
       kind: ActivityKind;
       text: string;
       amount?: number;
-      actorMemberId?: MemberId;
+      actorMemberId: MemberId; // required — the actor is always known
       expenseId?: ExpenseId;
       settlementId?: MemberId;
     },

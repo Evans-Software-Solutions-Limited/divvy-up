@@ -94,7 +94,14 @@ Exported Elysia plugin:
 export const coreErrorHandler = new Elysia({
   name: "core-error-handler",
 }).onError({ as: "global" }, ({ code, error, set, request }) => {
-  const requestId = request.headers.get("x-amz-request-id") ?? undefined;
+  // Correlation id comes from the API Gateway v2 request CONTEXT
+  // (`event.requestContext.requestId`, surfaced by the SST/Elysia Lambda adapter) — NOT a
+  // request header. There is no inbound `x-amz-request-id`; the only inbound AWS header is
+  // `x-amzn-trace-id` (X-Ray), kept as a fallback for distributed tracing.
+  const requestId =
+    getRequestContext()?.requestId ??
+    request.headers.get("x-amzn-trace-id") ??
+    undefined;
   const isProd = process.env.SST_STAGE === "production";
   const status = mapStatus(code, error); // see Data Models
   set.status = status;
@@ -166,8 +173,9 @@ existing concurrency / `sst unlock` conventions.
 ### E. Mobile release (R9, R10)
 
 - `packages/mobile/eas.json` (**new**) — `staging` / `production` build profiles + submit config.
-- `packages/mobile/app.config.ts` (**changed**) — icons, splash, permission strings, bundle ids,
-  version.
+- `packages/mobile/app.config.ts` (**changed**) — icons, splash, bundle ids, version (and an
+  **audit** that feature #6's camera/photo permission strings are present; #9 does not introduce
+  them).
 - `packages/mobile/jest.config.*` (**changed**) — coverage thresholds.
 - `docs/store-submission-checklist.md` (**new**) — the R10 checklist.
 
@@ -185,7 +193,7 @@ existing concurrency / `sst unlock` conventions.
   "validation": [
     /* … */
   ], // present only for 422 (R1.3)
-  "requestId": "8f3c-…", // present only when x-amz-request-id seen (R2)
+  "requestId": "8f3c-…", // from requestContext.requestId (X-Ray trace id fallback) (R2)
   "stack": "Error: …\n at …", // present only on non-production stages (R3.1/3.2)
 }
 ```
@@ -295,7 +303,8 @@ handler, infra, workflows) does get its own tests.
   - validation → 422 with `validation` present;
   - not-found → 404; parse → 400; unknown → 500;
   - `AppError` → its explicit status/code;
-  - `requestId` present when `x-amz-request-id` header set, omitted otherwise;
+  - `requestId` present when the request context exposes `requestId` (or an `x-amzn-trace-id`
+    fallback), omitted otherwise;
   - production stage (`SST_STAGE=production`) → no `stack`, generic 5xx `detail`; 4xx `detail`
     preserved; non-prod stage → `stack` present.
 - **Coverage gates**: raise Vitest thresholds to 90% (lines/functions/branches/statements) in

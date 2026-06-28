@@ -14,7 +14,7 @@ reference app `persistence-backend-sst` and Phase 6 of `docs/release-readiness-p
 In scope:
 
 - A **global structured Elysia error handler** applied across both services (`core` and
-  `other-service`): request-id correlation via `x-amz-request-id`, prod-safe stack traces, a
+  `other-service`): request-id correlation via the API Gateway request context, prod-safe stack traces, a
   consistent error shape, and deterministic status mapping.
 - **Coverage gates** in CI: Vitest v8 thresholds (target the reference's ~90%) for backend and
   shared packages, and Jest thresholds for mobile.
@@ -77,10 +77,12 @@ CloudWatch logs.
 
 #### Acceptance Criteria
 
-1. WHEN an inbound request carries an `x-amz-request-id` header THE SYSTEM SHALL include that value
-   as `requestId` in both the error response body and the `[api:error]` log line.
-2. WHERE the `x-amz-request-id` header is absent THE SYSTEM SHALL omit `requestId` from the
-   response body rather than emitting an empty or fabricated value.
+1. WHEN the API Gateway request context exposes a request id (`requestContext.requestId`, with the
+   inbound `x-amzn-trace-id` X-Ray header as fallback) THE SYSTEM SHALL include that value as
+   `requestId` in both the error response body and the `[api:error]` log line.
+2. WHERE no request id is available THE SYSTEM SHALL omit `requestId` from the response body rather
+   than emitting an empty or fabricated value. (There is no inbound `x-amz-request-id` header — that
+   is an AWS _response_ header, not something the client/API Gateway sends to the handler.)
 3. THE SYSTEM SHALL log the `requestId` against successful 4xx/5xx responses consistently so a
    single id correlates the client-visible error with the server log.
 
@@ -238,9 +240,11 @@ icons, privacy disclosures, or permission strings.
 
 1. THE SYSTEM SHALL provide the required app **icon** and **splash/adaptive** assets and wire them
    in `packages/mobile/app.config.ts` (or `app.json`).
-2. THE SYSTEM SHALL declare iOS usage-description strings for the **camera** (`NSCameraUsageDescription`)
-   and **photo library** (`NSPhotoLibraryUsageDescription`) and the equivalent Android
-   permissions, with copy that explains receipt scanning.
+2. THE SYSTEM SHALL **verify** the iOS usage-description strings for the **camera**
+   (`NSCameraUsageDescription`) and **photo library** (`NSPhotoLibraryUsageDescription`) and the
+   equivalent Android permissions are present with receipt-scanning copy. (These are introduced by
+   feature #6 when the camera/photo APIs ship — iOS terminates an app that requests them without the
+   strings — so this is a store-submission audit, not their first introduction.)
 3. THE SYSTEM SHALL set the iOS bundle identifier, Android package name, version, and the iOS App
    Store Connect app id / Apple team id (and Android service-account/track) needed by `eas submit`.
 4. THE SYSTEM SHALL include a **privacy policy** reference and a data-collection disclosure
