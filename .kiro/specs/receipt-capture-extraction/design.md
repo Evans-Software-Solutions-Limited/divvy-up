@@ -136,7 +136,9 @@ export interface ExtractedItem {
   description: string;
   quantity: number; // integer ≥ 1
   unitPrice: number; // integer pence ≥ 0
-  lineTotal: number; // integer pence ≥ 0  (== unitPrice * quantity unless the receipt prints otherwise)
+  lineTotal: number; // integer pence ≥ 0; MUST equal unitPrice * quantity (it is not persisted —
+  // only unit_price + quantity are stored). Extraction normalises combo/bulk pricing to satisfy
+  // this (e.g. "3 for £10" → quantity 1, unitPrice 1000) so no printed-total information is lost.
   confidence: number; // 0..1
   /** Present iff the model is unsure; drives the amber "check this" flag in #7. */
   flagReason: string | null;

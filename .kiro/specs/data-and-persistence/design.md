@@ -284,6 +284,34 @@ export const groupMembers = pgTable(
   }),
 );
 
+// ── group_invites ── (invite tokens; owned here, referenced by groups-and-members #5)
+export const groupInvites = pgTable(
+  "group_invites",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    groupId: uuid("group_id")
+      .notNull()
+      .references(() => groups.id, { onDelete: "cascade" }),
+    // the placeholder seat this invite fills, if any (null = open invite → new member on accept)
+    memberId: uuid("member_id").references(() => groupMembers.id, {
+      onDelete: "set null",
+    }),
+    tokenHash: text("token_hash").notNull(), // store a HASH, never the raw token
+    createdBy: uuid("created_by")
+      .notNull()
+      .references(() => users.id),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    usedAt: timestamp("used_at", { withTimezone: true }), // null until accepted
+    createdAt: timestamp("created_at", { withTimezone: true })
+      .notNull()
+      .defaultNow(),
+  },
+  (t) => ({
+    uniqTokenHash: uniqueIndex("group_invites_token_hash_uniq").on(t.tokenHash),
+    byGroup: index("group_invites_group_idx").on(t.groupId),
+  }),
+);
+
 // ── expenses ── (single payer; pence)
 export const expenses = pgTable(
   "expenses",
@@ -486,6 +514,7 @@ erDiagram
   users ||--o{ groups : "created_by"
   users ||--o{ group_members : "links (optional)"
   groups ||--o{ group_members : has
+  groups ||--o{ group_invites : has
   groups ||--o{ expenses : has
   groups ||--o{ settlements : has
   groups ||--o{ activity : has
@@ -646,6 +675,25 @@ class MembersRepository {
   remove(userId: string, memberId: MemberId): Promise<boolean>;
 }
 
+// ── GroupInvitesRepository ── (group_invites table; consumed by groups-and-members #5)
+class GroupInvitesRepository {
+  static readonly key = "GroupInvitesRepository";
+  constructor(db?: Db);
+  create(
+    userId: string,
+    groupId: GroupId,
+    input: { memberId?: MemberId; tokenHash: string; expiresAt: string },
+  ): Promise<{ id: string }>;
+  findByTokenHash(tokenHash: string): Promise<{
+    id: string;
+    groupId: GroupId;
+    memberId: MemberId | null;
+    expiresAt: string;
+    usedAt: string | null;
+  } | null>;
+  markUsed(id: string): Promise<void>;
+}
+
 // ── ExpensesRepository ──
 class ExpensesRepository {
   static readonly key = "ExpensesRepository";
@@ -691,7 +739,7 @@ class ActivityRepository {
       amount?: number;
       actorMemberId: MemberId; // required — the actor is always known
       expenseId?: ExpenseId;
-      settlementId?: MemberId;
+      settlementId?: SettlementId;
     },
   ): Promise<Activity>;
   listByGroup(
@@ -734,7 +782,10 @@ type CreateExpenseInput = {
 ### Reconciled `domain/types.ts`
 
 ```ts
-export type CustomShare = { memberId: MemberId; weight: number }; // integer weight, was float fraction
+// Id aliases (extend the existing GroupId/MemberId/ExpenseId/ReceiptItemId in domain/types.ts)
+export type SettlementId = string;
+export type ActivityId = string;
+export type CustomShare = { memberId: MemberId; weight: number }; // integer weight ≥ 1, was float fraction
 export type Member = {
   id: MemberId;
   groupId: GroupId;

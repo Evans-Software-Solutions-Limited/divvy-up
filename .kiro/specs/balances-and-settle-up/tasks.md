@@ -94,8 +94,9 @@
 
 - [ ] 18. Implement `ActivityRepository` (`microservices/core/src/application/activity/`)
       against `packages/db` `activity` table: `append`, `listByUser` (all groups), `listByGroup`,
-      newest-first, **paginated** (`limit` default+cap, `before` createdAt cursor — never return the
-      whole feed). _Requirements: 5.2, 5.3, 5.4_
+      newest-first, **paginated** (`limit` default+cap, **composite `before = (createdAt, id)`
+      cursor** — `createdAt` isn't unique, so tiebreak on `id` to avoid dropped/duplicated rows;
+      never return the whole feed). _Requirements: 5.2, 5.3, 5.4_
 
 - [ ] 19. Emit activity entries at the source events using the canonical `activity_kind` enum:
       `expense_added` **only on the actual `draft→finalized` transition** (not on idempotent

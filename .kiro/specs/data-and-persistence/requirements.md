@@ -123,6 +123,9 @@ model every Divvy Up entity with correct types, keys, and relationships, so that
    member, to member, amount, timestamp) with **no money-movement fields**.
 9. THE SYSTEM SHALL define an `activity` table for feed entries (group, actor, kind, free
    text, optional related expense/settlement, timestamp).
+   9a. THE SYSTEM SHALL define a `group_invites` table (group, optional placeholder `member_id`, a
+   **hashed** token with a unique index, `created_by`, `expires_at`, nullable `used_at`,
+   timestamp) — consumed by `groups-and-members` (#5).
 10. THE SYSTEM SHALL enumerate `expense_status`, `assignment_mode`, `adjustment_kind`, and
     `activity_kind` as Postgres enums shared across tables.
 11. THE SYSTEM SHALL declare foreign keys for every relationship with delete behaviour that

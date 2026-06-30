@@ -66,7 +66,8 @@ give it to everyone, or set custom shares, so that the split matches what actual
    resolved against the group's full member list at compute/finalize time.
 5. WHEN the user selects **Custom** THE SYSTEM SHALL present **integer share steppers** (e.g. 2 : 1),
    defaulting each picked member to a share of 1, and SHALL set the assignment to
-   `{ type: "custom", shares: [{ memberId, weight }] }` with `weight` an integer ≥ 0.
+   `{ type: "custom", shares: [{ memberId, weight }] }` with `weight` an integer ≥ 1 (a member with
+   no share is simply omitted; the DB CHECK is `share_weight > 0`).
 6. THE SYSTEM SHALL allow assigning to **accountless placeholder members** in every mode, rendering
    them with their dashed-avatar treatment.
 7. WHEN the user saves the Item editor THE SYSTEM SHALL clear that item's flag and unassigned state

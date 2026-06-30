@@ -105,9 +105,10 @@ export interface SplitInput {
 import type { Expense, Balance, MemberId } from "microservices/core domain";
 
 /**
- * Derive per-payer balances from a finalized expense using the shared engine.
+ * Derive balances from a finalized expense using the shared engine.
  * Returns one Balance per NON-payer member with a non-zero net (item shares +
- * pro-rata adjustments). `toMemberId` is always expense.payerId.
+ * pro-rata adjustments). Direction follows the SIGN of the net (see below): usually
+ * `to = payer`, but an over-discount can flip it to `from = payer`. `amount` is always > 0.
  *
  * `memberIds` resolves `everyone` assignments; pass the group's full member list.
  */
@@ -138,10 +139,9 @@ It applies:
   conversion (the engine consumes bps directly).
 - `memberIds`: passed through, used both for `everyone` resolution and as the canonical member set.
 
-`balancesFromExpense` is then just `toSplitInput` → `computeSplit` → drop payer → emit `Balance[]`.
-
-Then it runs `computeSplit`, drops the payer, and emits a `Balance` for every non-payer whose
-`perPerson` value is non-zero. **Direction follows the sign** of that value: when `perPerson[m] > 0`
+`balancesFromExpense` is then: `toSplitInput` → `computeSplit` → drop the payer → emit a `Balance`
+for every non-payer whose `perPerson` value is non-zero. **Direction follows the sign** of that
+value: when `perPerson[m] > 0`
 the member owes the payer → `{ from: m, to: payerId, amount: perPerson[m] }`; when `perPerson[m] < 0`
 (an over-discount made the member's net negative, so the **payer owes the member**) →
 `{ from: payerId, to: m, amount: -perPerson[m] }`. `amount` is therefore always positive and

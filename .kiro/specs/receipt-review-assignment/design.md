@@ -21,7 +21,7 @@ then implement the backend endpoints, then wire the real client and add integrat
 The scaffolded domain type and `PUT .../assignment` handler currently model custom splits as
 `shares: [{ memberId, fraction: number }]` (float fractions). The locked technical decision
 (`steering/tech.md`) and the split engine require **integer share weights**. This feature adopts
-`shares: [{ memberId, weight: number /* integer ≥ 0 */ }]` as the canonical wire + storage shape,
+`shares: [{ memberId, weight: number /* integer ≥ 1 — matches the DB CHECK share_weight > 0 */ }]` as the canonical wire + storage shape,
 and updates the existing assignment handler schema and `computeBalances` accordingly. The float
 `fraction` field is removed (it is unreleased scaffold). The split-engine's `computeSplit` consumes
 these integer weights directly via `splitPence(amount, weights)`.

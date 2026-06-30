@@ -25,8 +25,10 @@ Balances are **derived**, never stored. For a group the backend:
    `status === "finalized"`. Drafts are ignored.
 2. **Expands each expense into per-member obligations** using the split engine's purpose-built
    `balancesFromExpense(expense, memberIds)` (feature #3) — **not** a re-implementation. It runs
-   `computeSplit` internally, drops the payer, and returns `Balance[]` (`from` = each non-payer,
-   `to` = the payer, `amount` = their pence share incl. pro-rata adjustments):
+   `computeSplit` internally, drops the payer, and returns `Balance[]` where `amount` is the pence
+   share (incl. pro-rata adjustments) and the **direction follows the net's sign** — normally
+   `from` = a non-payer and `to` = the payer, but an over-discount can flip it to `from` = the payer
+   (see #3); `amount` is always > 0:
 
    ```
    for each finalized expense e:
@@ -179,8 +181,10 @@ type Settlement = {
 
 // GET /activity?limit=&before=            (all the user's groups)
 // GET /groups/:groupId/activity?limit=&before=   (one group)
-//   Paginated: `limit` (default 30, capped e.g. 100), `before` = createdAt cursor of the last
-//   row seen. The activity feed grows unbounded over a group's lifetime, so it is NEVER returned
+//   Paginated: `limit` (default 30, capped e.g. 100); `before` is a **composite** cursor
+//   `(createdAt, id)` — `createdAt` (timestamptz) is NOT unique (bulk member-add on group create,
+//   or a finalize emitting multiple entries in one instant), so ordering/keyset MUST tiebreak on
+//   `id` to avoid dropping or duplicating rows. The feed grows unbounded, so it is NEVER returned
 //   whole. (The settlements/groups/members list endpoints are bounded by group size for V1, but
 //   should adopt the same `limit`/`before` shape if any can grow large.)
 type ActivityEntry = {

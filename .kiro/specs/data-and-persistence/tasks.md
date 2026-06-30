@@ -56,7 +56,10 @@
     expense index.
   - _Requirements: 4.4, 4.5, 5.1, 5.3, 5.4_
 
-- [ ] **7. Define `item_assignments`, `receipt_adjustments`, `settlements`, `activity`**
+- [ ] **7. Define `group_invites`, `item_assignments`, `receipt_adjustments`, `settlements`, `activity`**
+  - `group_invites`: `group_id` FK (cascade), nullable `member_id` FK → group_members (set null),
+    `token_hash` (text, **unique index** — store a hash, not the raw token), `created_by`,
+    `expires_at`, nullable `used_at`, timestamp; group index.
   - `item_assignments` (member rows for `one`/`equal`/`custom`; `everyone` stores none — its mode
     is on `receipt_items`): `item_id` FK (cascade), `member_id` FK → group_members (restrict),
     `share_weight` **integer (custom only)**; unique `(item_id, member_id)`; the `weightRule`

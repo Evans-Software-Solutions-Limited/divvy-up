@@ -74,10 +74,12 @@
     by `userId` membership (non-member → null/uniform not-found); creator inserted as owner member.
   - _Requirements: 1.7, 2.4, 2.8, 3.5, 7.2, 7.4_
 
-- [ ] 12. Implement `GroupMembersRepository`
-  - `listMembers`, `addPlaceholder` (assigns non-clashing colour via the module), `removeMember`
-    (owner guard + referenced-member guard → deactivate not delete), `linkUserToMember`,
-    `addUserMember`; all membership-scoped.
+- [ ] 12. Implement the canonical `MembersRepository` (from #2 — not a separate
+      `GroupMembersRepository`)
+  - `listByGroup`, `findMembership` (userId→member), `addMember` (placeholder add assigns a
+    non-clashing colour via the module; account-linked add reactivates an existing inactive row
+    rather than inserting a duplicate), `linkUser` (placeholder → real), `remove` (owner guard +
+    referenced-member guard → deactivate via `active`, not hard-delete); all membership-scoped.
   - _Requirements: 4.1, 4.3, 4.4, 5.2, 5.6, 7.2_
 
 - [ ] 13. Implement `GroupInvitesRepository`

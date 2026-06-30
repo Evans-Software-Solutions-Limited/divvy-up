@@ -43,7 +43,7 @@ microservices/core  (Elysia on Lambda)
   application/invites/{create,accept}/                 →  InvitesService
         │                         │                         │
         ▼                         ▼                         ▼
-  GroupsRepository        GroupMembersRepository      GroupInvitesRepository
+  GroupsRepository          MembersRepository         GroupInvitesRepository
         └──────────── colourAssignment (pure) ───────────┘
         │
         ▼  packages/db (Drizzle) → Postgres / Supabase
@@ -83,16 +83,18 @@ create(userId: string, input: CreateGroupInput): Promise<GroupDetail>
 update(userId: string, groupId: string, patch: UpdateGroupPatch): Promise<GroupDetail> // owner-only
 remove(userId: string, groupId: string): Promise<void>  // owner-only
 
-// GroupMembersRepository
-listMembers(userId: string, groupId: string): Promise<Member[]>
-addPlaceholder(userId: string, groupId: string, name: string): Promise<Member>  // assigns colourIndex
-removeMember(userId: string, groupId: string, memberId: string): Promise<void>  // guards owner + referenced
-linkUserToMember(memberId: string, userId: string): Promise<Member>             // placeholder → real
-addUserMember(groupId: string, userId: string): Promise<Member>                 // new account-linked member
+// MembersRepository — canonical names + surface owned by data-and-persistence (#2). This feature
+// consumes that surface (it does not define a separate "GroupMembersRepository"):
+listByGroup(userId: string, groupId: string): Promise<Member[]>
+findMembership(userId: string, groupId: string): Promise<Member | null>          // userId → member in group
+addMember(userId: string, groupId: string, input: { name; colourIndex; placeholder?; userId? }): Promise<Member>
+//   placeholder add → { name, placeholder: true }; account-linked add → { userId }
+linkUser(userId: string, memberId: string, linkedUserId: string): Promise<Member> // placeholder → real
+remove(userId: string, memberId: string): Promise<boolean>                        // guards owner + referenced (soft-delete)
 
-// GroupInvitesRepository
-createInvite(userId: string, groupId: string, opts: { memberId?: string }): Promise<Invite>
-findByToken(token: string): Promise<InviteRecord | null>
+// GroupInvitesRepository — canonical surface owned by #2 (group_invites table):
+create(userId, groupId, input: { memberId?; tokenHash; expiresAt }): Promise<{ id }>
+findByTokenHash(tokenHash: string): Promise<InviteRecord | null>                  // look up by HASH, not raw token
 markUsed(inviteId: string): Promise<void>
 ```
 
