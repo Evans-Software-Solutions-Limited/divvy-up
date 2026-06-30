@@ -9,38 +9,38 @@
 /* ── Divvy Up design tokens (dark-first, warm indigo) ── */
 :root {
   /* surfaces */
-  --bg:        #0E0D15;
-  --bg-2:      #131220;
-  --surface:   #1A1928;
+  --bg: #0e0d15;
+  --bg-2: #131220;
+  --surface: #1a1928;
   --surface-2: #232136;
-  --surface-3: #2C2A42;
-  --hairline:  rgba(255,255,255,0.08);
-  --hairline-2:rgba(255,255,255,0.14);
+  --surface-3: #2c2a42;
+  --hairline: rgba(255, 255, 255, 0.08);
+  --hairline-2: rgba(255, 255, 255, 0.14);
 
   /* brand */
-  --brand:        #8071F2;
-  --brand-bright: #A99BFF;
-  --brand-dim:    #5A4FBF;
-  --brand-ink:    #2A2550;
-  --brand-wash:   rgba(128,113,242,0.16);
+  --brand: #8071f2;
+  --brand-bright: #a99bff;
+  --brand-dim: #5a4fbf;
+  --brand-ink: #2a2550;
+  --brand-wash: rgba(128, 113, 242, 0.16);
 
   /* warm accent */
-  --amber:        #FFA968;
-  --amber-bright: #FFC79A;
-  --amber-wash:   rgba(255,169,104,0.16);
+  --amber: #ffa968;
+  --amber-bright: #ffc79a;
+  --amber-wash: rgba(255, 169, 104, 0.16);
 
   /* semantic money */
-  --pos:        #4ADE9E;
-  --pos-wash:   rgba(74,222,158,0.15);
-  --neg:        #FF7A7A;
-  --neg-wash:   rgba(255,122,122,0.14);
+  --pos: #4ade9e;
+  --pos-wash: rgba(74, 222, 158, 0.15);
+  --neg: #ff7a7a;
+  --neg-wash: rgba(255, 122, 122, 0.14);
 
   /* text */
-  --ink:   #F7F5FF;
-  --ink-2: rgba(247,245,255,0.74);
-  --ink-3: rgba(247,245,255,0.5);
-  --ink-4: rgba(247,245,255,0.3);
-  --on-brand: #FFFFFF;
+  --ink: #f7f5ff;
+  --ink-2: rgba(247, 245, 255, 0.74);
+  --ink-3: rgba(247, 245, 255, 0.5);
+  --ink-4: rgba(247, 245, 255, 0.3);
+  --on-brand: #ffffff;
 
   /* radii */
   --r-xs: 8px;
@@ -51,19 +51,19 @@
   --r-pill: 999px;
 
   /* shadows */
-  --shadow-card: 0 1px 2px rgba(0,0,0,0.4), 0 8px 24px rgba(0,0,0,0.28);
-  --shadow-pop:  0 12px 40px rgba(0,0,0,0.5), 0 2px 8px rgba(0,0,0,0.4);
-  --shadow-brand:0 8px 30px rgba(128,113,242,0.45);
+  --shadow-card: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 24px rgba(0, 0, 0, 0.28);
+  --shadow-pop: 0 12px 40px rgba(0, 0, 0, 0.5), 0 2px 8px rgba(0, 0, 0, 0.4);
+  --shadow-brand: 0 8px 30px rgba(128, 113, 242, 0.45);
 
   /* people palette */
-  --p1: #8071F2;
-  --p2: #FF7A66;
-  --p3: #3BC9B0;
-  --p4: #FFB23E;
-  --p5: #FF6FA5;
-  --p6: #4DA8FF;
-  --p7: #9BD64A;
-  --p8: #C07BFF;
+  --p1: #8071f2;
+  --p2: #ff7a66;
+  --p3: #3bc9b0;
+  --p4: #ffb23e;
+  --p5: #ff6fa5;
+  --p6: #4da8ff;
+  --p7: #9bd64a;
+  --p8: #c07bff;
 
   /* shadcn compat */
   --background: var(--bg);
@@ -114,15 +114,87 @@
   --radius-xl: calc(var(--radius) + 8px);
 }
 
-@keyframes dd-rise   { from { opacity: 0; transform: translateY(14px); } to { opacity: 1; transform: none; } }
-@keyframes dd-fade   { from { opacity: 0; } to { opacity: 1; } }
-@keyframes dd-pop    { 0% { opacity: 0; transform: scale(0.8); } 60% { transform: scale(1.06); } 100% { opacity: 1; transform: scale(1); } }
-@keyframes dd-sheet-up { from { transform: translateY(100%); } to { transform: translateY(0); } }
-@keyframes dd-spin   { to { transform: rotate(360deg); } }
-@keyframes dd-pulse  { 0%,100% { opacity: 0.55; } 50% { opacity: 1; } }
-@keyframes dd-check-draw { from { stroke-dashoffset: 60; } to { stroke-dashoffset: 0; } }
-@keyframes dd-confetti { 0% { transform: translateY(0) rotate(0); opacity: 1; } 100% { transform: translateY(420px) rotate(540deg); opacity: 0; } }
-@keyframes dd-ring   { 0% { transform: scale(0.4); opacity: 0.7; } 100% { transform: scale(1.5); opacity: 0; } }
+@keyframes dd-rise {
+  from {
+    opacity: 0;
+    transform: translateY(14px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes dd-fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes dd-pop {
+  0% {
+    opacity: 0;
+    transform: scale(0.8);
+  }
+  60% {
+    transform: scale(1.06);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@keyframes dd-sheet-up {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+@keyframes dd-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+@keyframes dd-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 1;
+  }
+}
+@keyframes dd-check-draw {
+  from {
+    stroke-dashoffset: 60;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes dd-confetti {
+  0% {
+    transform: translateY(0) rotate(0);
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(420px) rotate(540deg);
+    opacity: 0;
+  }
+}
+@keyframes dd-ring {
+  0% {
+    transform: scale(0.4);
+    opacity: 0.7;
+  }
+  100% {
+    transform: scale(1.5);
+    opacity: 0;
+  }
+}
 
 @layer base {
   * {
@@ -145,7 +217,9 @@
   scrollbar-width: none;
   -ms-overflow-style: none;
 }
-.dd-scroll::-webkit-scrollbar { display: none; }
+.dd-scroll::-webkit-scrollbar {
+  display: none;
+}
 
 .dd-display {
   font-family: var(--font-display);
