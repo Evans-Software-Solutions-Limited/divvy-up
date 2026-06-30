@@ -19,6 +19,7 @@ export function Avatar({
 }: AvatarProps) {
   const initials = name
     .split(" ")
+    .filter((w) => w.length > 0)
     .map((w) => w[0])
     .join("")
     .toUpperCase()

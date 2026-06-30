@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate, useParams, useLocation } from "react-router";
 import { useGetGroupBalances } from "@/hooks/api/useGetGroupBalances";
 import { Avatar } from "@/components/dd/Avatar";
@@ -29,10 +29,17 @@ function SettleUpSheet({
   onPaid,
 }: SettleUpSheetProps) {
   const [paid, setPaid] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (timerRef.current !== null) clearTimeout(timerRef.current);
+    };
+  }, []);
 
   function markPaid() {
     setPaid(true);
-    setTimeout(onPaid, 1700);
+    timerRef.current = setTimeout(onPaid, 1700);
   }
 
   return (

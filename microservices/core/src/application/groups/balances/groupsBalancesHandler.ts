@@ -18,29 +18,36 @@ export const groupsBalancesHandler = new Elysia()
       const finalized = expenses.filter((e) => e.status === "finalized");
       const memberIds = group.members.map((m) => m.id);
 
-      // Aggregate net balances across all finalized expenses
+      // Aggregate net balances across all finalized expenses.
+      // Use a canonical key (lower ID first) so A→B and B→A accumulate into
+      // one signed value; positive means first ID owes second ID.
       const netOwed = new Map<string, number>();
-      const key = (from: string, to: string) => `${from}→${to}`;
 
       for (const expense of finalized) {
-        const balances = computeBalances(expense, memberIds);
-        for (const b of balances) {
-          const k = key(b.fromMemberId, b.toMemberId);
-          netOwed.set(k, (netOwed.get(k) ?? 0) + b.amount);
+        const expenseBalances = computeBalances(expense, memberIds);
+        for (const b of expenseBalances) {
+          const [lo, hi] =
+            b.fromMemberId < b.toMemberId
+              ? [b.fromMemberId, b.toMemberId]
+              : [b.toMemberId, b.fromMemberId];
+          const k = `${lo}→${hi}`;
+          // positive = lo owes hi; negative = hi owes lo
+          const sign = b.fromMemberId === lo ? 1 : -1;
+          netOwed.set(k, (netOwed.get(k) ?? 0) + sign * b.amount);
         }
       }
 
-      const balances: Balance[] = [...netOwed.entries()]
-        .filter(([, amount]) => amount > 0)
-        .map(([k, amount]) => {
-          const [fromMemberId, toMemberId] = k.split("→");
-          return {
-            groupId: ctx.params.id,
-            fromMemberId,
-            toMemberId,
-            amount,
-          };
+      const balances: Balance[] = [];
+      for (const [k, net] of netOwed) {
+        if (net === 0) continue;
+        const [lo, hi] = k.split("→");
+        balances.push({
+          groupId: ctx.params.id,
+          fromMemberId: net > 0 ? lo : hi,
+          toMemberId: net > 0 ? hi : lo,
+          amount: Math.abs(net),
         });
+      }
 
       return { group, balances };
     },

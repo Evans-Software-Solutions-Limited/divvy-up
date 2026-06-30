@@ -492,7 +492,7 @@ export function ReceiptReview() {
     | null
     | undefined;
 
-  const { data: rawGroup } = useGetGroup(expense?.groupId ?? "");
+  const { data: rawGroup } = useGetGroup(expense?.groupId);
   const group = rawGroup as
     | { members: Array<{ id: string; name: string }> }
     | null
@@ -526,13 +526,16 @@ export function ReceiptReview() {
   const flagged = items.filter((it) => !it.assignment);
 
   async function saveAssignment(itemId: string, assignment: ItemAssignment) {
-    setLocalItems((prev) =>
-      (prev ?? expense?.items ?? []).map((it) =>
-        it.id === itemId ? { ...it, assignment } : it,
-      ),
+    const snapshot = localItems ?? expense?.items ?? [];
+    setLocalItems(
+      snapshot.map((it) => (it.id === itemId ? { ...it, assignment } : it)),
     );
     setEditing(null);
-    await updateAssignment.mutateAsync({ itemId, assignment });
+    try {
+      await updateAssignment.mutateAsync({ itemId, assignment });
+    } catch {
+      setLocalItems(snapshot);
+    }
   }
 
   async function handleFinalize() {
