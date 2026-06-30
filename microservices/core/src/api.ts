@@ -12,6 +12,7 @@ import { expensesCreateHandler } from "./application/expenses/create/expensesCre
 import { expensesGetHandler } from "./application/expenses/get/expensesGetHandler";
 import { expensesItemAssignmentHandler } from "./application/expenses/items/assignment/expensesItemAssignmentHandler";
 import { expensesFinalizeHandler } from "./application/expenses/finalize/expensesFinalizeHandler";
+import { groupsBalancesHandler } from "./application/groups/balances/groupsBalancesHandler";
 
 const app = new Elysia()
   .use(openapi())
@@ -23,7 +24,8 @@ const app = new Elysia()
   .use(expensesCreateHandler)
   .use(expensesGetHandler)
   .use(expensesItemAssignmentHandler)
-  .use(expensesFinalizeHandler);
+  .use(expensesFinalizeHandler)
+  .use(groupsBalancesHandler);
 
 export type CoreApi = typeof app;
 

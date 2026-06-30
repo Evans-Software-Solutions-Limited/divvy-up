@@ -483,6 +483,7 @@ export function ReceiptReview() {
     | {
         id: string;
         groupId: string;
+        payerId: string;
         description: string;
         date: string;
         status: string;
@@ -589,7 +590,10 @@ export function ReceiptReview() {
     return (
       <SavedScreen
         onContinue={() =>
-          navigate(expense.groupId ? `/groups/${expense.groupId}` : "/")
+          navigate(
+            expense.groupId ? `/groups/${expense.groupId}/balances` : "/",
+            { state: { payerId: expense.payerId } },
+          )
         }
       />
     );
