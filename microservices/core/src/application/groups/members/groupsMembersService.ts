@@ -4,7 +4,7 @@ import {
   groupsRepo,
 } from "../../repositories/groupsRepository";
 
-export const GroupsRepositoryService = new Elysia().decorate(
+export const GroupsMembersService = new Elysia().decorate(
   GroupsRepository.key,
   groupsRepo,
 );
