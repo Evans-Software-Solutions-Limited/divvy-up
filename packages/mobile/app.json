@@ -1,0 +1,96 @@
+{
+  "expo": {
+    "name": "Divvy Up",
+    "slug": "divvy-up",
+    "version": "0.1.0",
+    "orientation": "portrait",
+    "scheme": "divvyup",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "supportsTablet": true,
+      "icon": "./assets/icons/ios.png",
+      "bundleIdentifier": "com.divvyup.app",
+      "usesAppleSignIn": true,
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSPhotoLibraryUsageDescription": "Divvy Up needs access to your photos so you can add a receipt image.",
+        "NSCameraUsageDescription": "Divvy Up uses the camera to scan receipts."
+      },
+      "entitlements": {
+        "aps-environment": "production"
+      }
+    },
+    "android": {
+      "adaptiveIcon": {
+        "backgroundColor": "#0E0D15",
+        "foregroundImage": "./assets/icons/adaptive-icon.png",
+        "monochromeImage": "./assets/icons/adaptive-icon.png"
+      },
+      "edgeToEdgeEnabled": true,
+      "package": "com.divvyup.app",
+      "minSdkVersion": 28
+    },
+    "web": {
+      "output": "static",
+      "favicon": "./assets/icons/ios.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-router",
+      [
+        "expo-splash-screen",
+        {
+          "image": "./assets/icons/splash-icon-light.png",
+          "imageWidth": 200,
+          "resizeMode": "contain",
+          "backgroundColor": "#F7F5FF",
+          "dark": {
+            "image": "./assets/icons/splash-icon-dark.png",
+            "backgroundColor": "#0E0D15"
+          }
+        }
+      ],
+      [
+        "expo-build-properties",
+        {
+          "android": {
+            "compileSdkVersion": 35,
+            "targetSdkVersion": 34,
+            "minSdkVersion": 28,
+            "buildToolsVersion": "35.0.0"
+          }
+        }
+      ],
+      "expo-sqlite",
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/icons/adaptive-icon.png",
+          "color": "#0E0D15"
+        }
+      ],
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Divvy Up needs access to your photos so you can add a receipt image.",
+          "cameraPermission": "Divvy Up uses the camera to scan receipts."
+        }
+      ],
+      "expo-font",
+      "expo-apple-authentication",
+      "expo-image",
+      [
+        "expo-camera",
+        {
+          "cameraPermission": "Divvy Up uses the camera to scan receipts."
+        }
+      ]
+    ],
+    "experiments": {
+      "typedRoutes": true
+    },
+    "extra": {
+      "router": {}
+    }
+  }
+}
