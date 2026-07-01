@@ -8,8 +8,8 @@ import type { ApiPort } from "@/domain/ports/api.port";
  */
 export function getApiBaseUrl(): string {
   return (
-    (Constants.expoConfig?.extra?.apiBaseUrl as string | undefined) ??
-    process.env.EXPO_PUBLIC_API_BASE_URL ??
+    (Constants.expoConfig?.extra?.apiUrl as string | undefined) ??
+    process.env.EXPO_PUBLIC_API_URL ??
     ""
   );
 }
