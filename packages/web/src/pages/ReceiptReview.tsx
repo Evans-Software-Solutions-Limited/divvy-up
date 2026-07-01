@@ -1,511 +1,1037 @@
 import { useState, useMemo } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
+import { useNavigate, useParams } from "react-router";
+import { useGetExpense } from "@/hooks/api/useGetExpense";
+import { useGetGroup } from "@/hooks/api/useGetGroup";
+import { useUpdateItemAssignment } from "@/hooks/api/useUpdateItemAssignment";
+import { useFinalizeExpense } from "@/hooks/api/useFinalizeExpense";
+import { Avatar, AvatarStack } from "@/components/dd/Avatar";
+import { Money } from "@/components/dd/Money";
+import { Sheet } from "@/components/dd/Sheet";
+import { splitPence, memberColor, fmt } from "@/lib/people";
 import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+  IconArrowLeft,
+  IconSparkles,
+  IconFlag,
+  IconCheck,
+  IconReceipt,
+} from "@tabler/icons-react";
 
-/**
- * Mock receipt data for demonstration
- */
-const MOCK_RECEIPT = {
-  merchant: "Trattoria Roma",
-  date: "2026-03-26",
-  currency: "USD",
-  subtotal: 9500, // cents
-  tax: 1200,
-  tip: 0,
-  total: 10700,
-  items: [
-    {
-      id: "item-1",
-      description: "Pasta Carbonara",
-      unitPrice: 1800,
-      quantity: 1,
-    },
-    { id: "item-2", description: "Caesar Salad", unitPrice: 1200, quantity: 1 },
-    { id: "item-3", description: "House Wine", unitPrice: 2400, quantity: 2 },
-    { id: "item-4", description: "Espresso", unitPrice: 400, quantity: 2 },
-  ],
-};
+type AssignMode = "one" | "equal" | "everyone" | "custom";
 
-const MOCK_MEMBERS = [
-  { id: "member-1", name: "Alice" },
-  { id: "member-2", name: "Bob" },
-  { id: "member-3", name: "Charlie" },
-];
+type ItemAssignment =
+  | { type: "one"; memberId: string }
+  | { type: "equal"; memberIds: string[] }
+  | { type: "everyone" }
+  | { type: "custom"; shares: Array<{ memberId: string; fraction: number }> };
 
-type SplitMode = "one" | "equal" | "everyone" | "custom";
-
-interface ItemAssignment {
-  itemId: string;
-  mode: SplitMode;
-  assignedMemberIds: string[];
-  customShares?: Record<string, number>; // member id -> fraction
+interface ReceiptItem {
+  id: string;
+  description: string;
+  unitPrice: number;
+  quantity: number;
+  assignment: ItemAssignment | null;
 }
 
-interface ReceiptReviewProps {
-  onFinalize?: (balances: CalculatedBalance[]) => void;
+interface Member {
+  id: string;
+  name: string;
+  color: string;
 }
 
-interface CalculatedBalance {
-  fromMemberId: string;
-  toMemberId: string;
-  amount: number;
-}
+function computeSplit(items: ReceiptItem[], memberIds: string[]) {
+  const per: Record<string, number> = Object.fromEntries(
+    memberIds.map((id) => [id, 0]),
+  );
+  let unassigned = 0;
+  let itemsSubtotal = 0;
 
-/**
- * Calculate who owes whom based on current item assignments.
- * Returns a simplified balance sheet.
- */
-function calculateBalances(
-  items: typeof MOCK_RECEIPT.items,
-  assignments: ItemAssignment[],
-  taxAmount: number,
-  tipAmount: number,
-  discountAmount: number,
-): CalculatedBalance[] {
-  // Create a map of member->total owed
-  const owedByMember: Record<string, number> = {};
-  MOCK_MEMBERS.forEach((m) => {
-    owedByMember[m.id] = 0;
-  });
-
-  // First, assign item costs
-  assignments.forEach((assignment) => {
-    const item = items.find((i) => i.id === assignment.itemId);
-    if (!item) return;
-
-    const itemTotal = item.unitPrice * item.quantity;
-
-    if (assignment.mode === "one") {
-      owedByMember[assignment.assignedMemberIds[0]] += itemTotal;
-    } else if (assignment.mode === "equal") {
-      const perPerson = itemTotal / assignment.assignedMemberIds.length;
-      assignment.assignedMemberIds.forEach((memberId) => {
-        owedByMember[memberId] += perPerson;
-      });
-    } else if (assignment.mode === "everyone") {
-      const perPerson = itemTotal / MOCK_MEMBERS.length;
-      MOCK_MEMBERS.forEach((m) => {
-        owedByMember[m.id] += perPerson;
-      });
-    } else if (assignment.mode === "custom" && assignment.customShares) {
-      Object.entries(assignment.customShares).forEach(
-        ([memberId, fraction]) => {
-          owedByMember[memberId] += itemTotal * fraction;
-        },
-      );
+  for (const it of items) {
+    const amt = it.unitPrice * it.quantity;
+    itemsSubtotal += amt;
+    const a = it.assignment;
+    if (!a) {
+      unassigned += amt;
+      continue;
     }
-  });
 
-  // Distribute tax proportionally
-  const totalOwed = Object.values(owedByMember).reduce((a, b) => a + b, 0);
-  if (totalOwed > 0) {
-    Object.keys(owedByMember).forEach((memberId) => {
-      owedByMember[memberId] +=
-        (taxAmount * owedByMember[memberId]) / totalOwed;
+    let targets: string[];
+    let weights: number[];
+
+    if (a.type === "one") {
+      targets = [a.memberId];
+      weights = [1];
+    } else if (a.type === "equal") {
+      targets = a.memberIds;
+      weights = a.memberIds.map(() => 1);
+    } else if (a.type === "everyone") {
+      targets = memberIds;
+      weights = memberIds.map(() => 1);
+    } else {
+      targets = a.shares.map((s) => s.memberId);
+      weights = a.shares.map((s) => s.fraction);
+    }
+
+    if (!targets.length) {
+      unassigned += amt;
+      continue;
+    }
+    const parts = splitPence(amt, weights);
+    targets.forEach((id, i) => {
+      per[id] = (per[id] ?? 0) + parts[i];
     });
   }
 
-  // Distribute tip evenly (simple approach)
-  const tipPerPerson = tipAmount / MOCK_MEMBERS.length;
-  MOCK_MEMBERS.forEach((m) => {
-    owedByMember[m.id] += tipPerPerson;
-  });
-
-  // Apply discount evenly
-  const discountPerPerson = discountAmount / MOCK_MEMBERS.length;
-  MOCK_MEMBERS.forEach((m) => {
-    owedByMember[m.id] -= discountPerPerson;
-  });
-
-  // Convert individual oweds to pairwise balances
-  // For simplicity: first member (payer) is the reference; others owe them
-  const payer = MOCK_MEMBERS[0];
-  const balances: CalculatedBalance[] = [];
-
-  MOCK_MEMBERS.forEach((member) => {
-    if (member.id !== payer.id && owedByMember[member.id] > 0) {
-      balances.push({
-        fromMemberId: member.id,
-        toMemberId: payer.id,
-        amount: Math.round(owedByMember[member.id]),
-      });
-    }
-  });
-
-  return balances;
+  return { perPerson: per, unassigned, itemsSubtotal, total: itemsSubtotal };
 }
 
-export function ReceiptReview({ onFinalize }: ReceiptReviewProps) {
-  const [assignments, setAssignments] = useState<ItemAssignment[]>(
-    MOCK_RECEIPT.items.map((item) => ({
-      itemId: item.id,
-      mode: "everyone" as SplitMode,
-      assignedMemberIds: MOCK_MEMBERS.map((m) => m.id),
-    })),
+function AssignBadge({
+  assignment,
+  allMembers,
+}: {
+  assignment: ItemAssignment | null;
+  allMembers: Member[];
+}) {
+  if (!assignment) {
+    return (
+      <span
+        style={{
+          fontSize: 12,
+          fontWeight: 800,
+          color: "#3A1B02",
+          background: "var(--amber)",
+          padding: "4px 11px",
+          borderRadius: 999,
+        }}
+      >
+        Assign
+      </span>
+    );
+  }
+  if (assignment.type === "everyone") {
+    return (
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: 5,
+          background: "var(--surface-3)",
+          padding: "3px 9px 3px 4px",
+          borderRadius: 999,
+        }}
+      >
+        <AvatarStack members={allMembers} size={18} max={4} />
+        <span
+          style={{ fontSize: 11.5, fontWeight: 700, color: "var(--ink-2)" }}
+        >
+          All
+        </span>
+      </span>
+    );
+  }
+  const ids =
+    assignment.type === "one"
+      ? [assignment.memberId]
+      : assignment.type === "equal"
+        ? assignment.memberIds
+        : assignment.shares.map((s) => s.memberId);
+  const assigned = ids
+    .map((id) => allMembers.find((m) => m.id === id))
+    .filter(Boolean) as Member[];
+  return assigned.length === 1 ? (
+    <Avatar name={assigned[0].name} color={assigned[0].color} size={26} />
+  ) : (
+    <AvatarStack members={assigned} size={24} max={3} />
+  );
+}
+
+function ItemEditor({
+  item,
+  allMembers,
+  onClose,
+  onSave,
+}: {
+  item: ReceiptItem;
+  allMembers: Member[];
+  onClose: () => void;
+  onSave: (itemId: string, assignment: ItemAssignment) => void;
+}) {
+  const init = item.assignment;
+  const [mode, setMode] = useState<AssignMode>(
+    init?.type === "one"
+      ? "one"
+      : init?.type === "equal"
+        ? "equal"
+        : init?.type === "everyone"
+          ? "everyone"
+          : "everyone",
+  );
+  const [selectedIds, setSelectedIds] = useState<string[]>(
+    init
+      ? init.type === "one"
+        ? [init.memberId]
+        : init.type === "equal"
+          ? init.memberIds
+          : init.type === "everyone"
+            ? allMembers.map((m) => m.id)
+            : init.shares.map((s) => s.memberId)
+      : [],
   );
 
-  const [tax, setTax] = useState(MOCK_RECEIPT.tax);
-  const [tip, setTip] = useState(MOCK_RECEIPT.tip);
-  const [discount, setDiscount] = useState(0);
+  const modes: [AssignMode, string][] = [
+    ["one", "One"],
+    ["equal", "Split"],
+    ["everyone", "Everyone"],
+    ["custom", "Custom"],
+  ];
+  const amt = item.unitPrice * item.quantity;
 
-  const [showFinalize, setShowFinalize] = useState(false);
+  function buildAssignment(): ItemAssignment {
+    if (mode === "everyone") return { type: "everyone" };
+    if (mode === "one")
+      return { type: "one", memberId: selectedIds[0] ?? allMembers[0]?.id };
+    if (mode === "equal")
+      return {
+        type: "equal",
+        memberIds: selectedIds.length ? selectedIds : [allMembers[0]?.id],
+      };
+    return {
+      type: "custom",
+      shares: selectedIds.map((id) => ({
+        memberId: id,
+        fraction: 1 / selectedIds.length,
+      })),
+    };
+  }
 
-  const balances = useMemo(() => {
-    return calculateBalances(
-      MOCK_RECEIPT.items,
-      assignments,
-      tax,
-      tip,
-      discount,
-    );
-  }, [assignments, tax, tip, discount]);
-
-  const handleAssignmentChange = (
-    itemId: string,
-    mode: SplitMode,
-    memberIds?: string[],
-  ) => {
-    setAssignments((prev) =>
-      prev.map((a) =>
-        a.itemId === itemId
-          ? {
-              ...a,
-              mode,
-              assignedMemberIds: memberIds || a.assignedMemberIds,
-            }
-          : a,
-      ),
-    );
-  };
-
-  const handleFinalize = () => {
-    if (onFinalize) {
-      onFinalize(balances);
+  const preview = useMemo(() => {
+    if (mode === "everyone") {
+      const p = splitPence(
+        amt,
+        allMembers.map(() => 1),
+      );
+      return Object.fromEntries(allMembers.map((m, i) => [m.id, p[i]]));
     }
-    setShowFinalize(false);
-  };
+    if (mode === "one") {
+      const id = selectedIds[0] ?? allMembers[0]?.id;
+      return id ? { [id]: amt } : {};
+    }
+    if (!selectedIds.length) return {};
+    const p = splitPence(
+      amt,
+      selectedIds.map(() => 1),
+    );
+    return Object.fromEntries(selectedIds.map((id, i) => [id, p[i]]));
+  }, [mode, selectedIds, amt, allMembers]);
 
-  const getItemAssignment = (itemId: string) => {
-    return assignments.find((a) => a.itemId === itemId);
-  };
+  function toggleId(id: string) {
+    if (mode === "one") {
+      setSelectedIds([id]);
+      return;
+    }
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id],
+    );
+  }
 
-  const formatCurrency = (cents: number) => {
-    return `$${(cents / 100).toFixed(2)}`;
+  const modeHint: Record<AssignMode, string> = {
+    one: "One person pays for this item.",
+    equal: "Split equally between everyone you pick.",
+    everyone: "Everyone in the group splits it evenly.",
+    custom: "Pick who shares this item.",
   };
 
   return (
-    <div className="space-y-6 p-6 max-w-4xl mx-auto">
-      {/* Receipt Header */}
-      <Card>
-        <CardHeader>
-          <CardTitle>{MOCK_RECEIPT.merchant || "Receipt"}</CardTitle>
-          <div className="text-sm text-gray-600 space-y-1">
-            <p>Date: {MOCK_RECEIPT.date}</p>
-            <p>Currency: {MOCK_RECEIPT.currency}</p>
+    <Sheet open onClose={onClose} pad={false}>
+      <div style={{ padding: "2px 18px 0" }}>
+        <div
+          style={{
+            background: "var(--surface)",
+            borderRadius: 14,
+            padding: "12px 14px",
+            marginBottom: 8,
+          }}
+        >
+          <div className="dd-display" style={{ fontSize: 19 }}>
+            {item.description}
           </div>
-        </CardHeader>
-      </Card>
-
-      {/* Items Section */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Line Items</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          {MOCK_RECEIPT.items.map((item) => {
-            const assignment = getItemAssignment(item.id);
-            const itemTotal = item.unitPrice * item.quantity;
-
-            return (
-              <div key={item.id} className="border rounded-lg p-4 space-y-3">
-                <div className="flex justify-between items-start">
-                  <div>
-                    <p className="font-medium">{item.description}</p>
-                    <p className="text-sm text-gray-600">
-                      {item.quantity} × {formatCurrency(item.unitPrice)} ={" "}
-                      {formatCurrency(itemTotal)}
-                    </p>
-                  </div>
-                  <p className="font-semibold">{formatCurrency(itemTotal)}</p>
+          <div
+            style={{
+              color: "var(--ink-3)",
+              fontSize: 13.5,
+              fontWeight: 600,
+              marginTop: 2,
+            }}
+          >
+            {fmt(item.unitPrice)}
+            {item.quantity > 1 ? ` × ${item.quantity} = ${fmt(amt)}` : ""}
+          </div>
+        </div>
+        <div
+          style={{
+            display: "flex",
+            gap: 6,
+            background: "var(--surface)",
+            padding: 4,
+            borderRadius: 14,
+            marginBottom: 8,
+          }}
+        >
+          {modes.map(([k, label]) => (
+            <button
+              key={k}
+              onClick={() => setMode(k)}
+              style={{
+                flex: 1,
+                height: 38,
+                borderRadius: 10,
+                fontSize: 13.5,
+                fontWeight: 700,
+                background: mode === k ? "var(--brand)" : "transparent",
+                color: mode === k ? "var(--on-brand)" : "var(--ink-2)",
+                border: "none",
+                cursor: "pointer",
+                transition: "all .15s",
+              }}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+        <div
+          style={{
+            fontSize: 12.5,
+            color: "var(--ink-3)",
+            fontWeight: 600,
+            padding: "0 2px 10px",
+          }}
+        >
+          {modeHint[mode]}
+        </div>
+      </div>
+      <div
+        style={{
+          padding: "0 18px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 7,
+        }}
+      >
+        {allMembers.map((m) => {
+          const selected =
+            mode === "everyone" ? true : selectedIds.includes(m.id);
+          const pay = preview[m.id];
+          return (
+            <div
+              key={m.id}
+              onClick={() => mode !== "everyone" && toggleId(m.id)}
+              style={{
+                display: "flex",
+                alignItems: "center",
+                gap: 12,
+                padding: "9px 13px",
+                borderRadius: 14,
+                background: selected ? "var(--brand-wash)" : "var(--surface)",
+                border: `1px solid ${selected ? "var(--brand-dim)" : "var(--hairline)"}`,
+                cursor: mode === "everyone" ? "default" : "pointer",
+                transition: "all .15s",
+              }}
+            >
+              <Avatar name={m.name} color={m.color} size={36} dim={!selected} />
+              <div style={{ flex: 1 }}>
+                <div
+                  style={{
+                    fontSize: 15,
+                    fontWeight: 700,
+                    color: selected ? "var(--ink)" : "var(--ink-3)",
+                  }}
+                >
+                  {m.name}
                 </div>
-
-                {assignment && (
-                  <div className="space-y-2">
-                    <div className="text-sm">
-                      <Label className="text-gray-700">Split Mode</Label>
-                      <Select
-                        value={assignment.mode}
-                        onValueChange={(mode) =>
-                          handleAssignmentChange(
-                            item.id,
-                            mode as SplitMode,
-                            undefined,
-                          )
-                        }
-                      >
-                        <SelectTrigger className="mt-1">
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="one">One Person</SelectItem>
-                          <SelectItem value="equal">Equal Split</SelectItem>
-                          <SelectItem value="everyone">Everyone</SelectItem>
-                          <SelectItem value="custom">Custom Shares</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {assignment.mode === "one" && (
-                      <div>
-                        <Label className="text-sm">Assign to</Label>
-                        <Select
-                          value={assignment.assignedMemberIds[0] || ""}
-                          onValueChange={(memberId) =>
-                            handleAssignmentChange(item.id, "one", [memberId])
-                          }
-                        >
-                          <SelectTrigger className="mt-1">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {MOCK_MEMBERS.map((m) => (
-                              <SelectItem key={m.id} value={m.id}>
-                                {m.name}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    )}
-
-                    {assignment.mode === "equal" && (
-                      <div className="space-y-2">
-                        <Label className="text-sm">Split among</Label>
-                        <div className="space-y-1">
-                          {MOCK_MEMBERS.map((member) => (
-                            <label
-                              key={member.id}
-                              className="flex items-center space-x-2"
-                            >
-                              <input
-                                type="checkbox"
-                                checked={assignment.assignedMemberIds.includes(
-                                  member.id,
-                                )}
-                                onChange={(e) => {
-                                  const newIds = e.target.checked
-                                    ? [
-                                        ...assignment.assignedMemberIds,
-                                        member.id,
-                                      ]
-                                    : assignment.assignedMemberIds.filter(
-                                        (id) => id !== member.id,
-                                      );
-                                  handleAssignmentChange(
-                                    item.id,
-                                    "equal",
-                                    newIds,
-                                  );
-                                }}
-                              />
-                              <span className="text-sm">{member.name}</span>
-                            </label>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="text-xs text-gray-600 mt-2">
-                      {assignment.mode === "everyone" &&
-                        "Split evenly among all members"}
-                      {assignment.mode === "one" &&
-                        `Assigned to ${MOCK_MEMBERS.find((m) => m.id === assignment.assignedMemberIds[0])?.name}`}
-                      {assignment.mode === "equal" &&
-                        `Split among ${assignment.assignedMemberIds.length} member(s)`}
-                      {assignment.mode === "custom" &&
-                        "Custom shares configured"}
-                    </div>
-                  </div>
+                {selected && pay != null && (
+                  <Money pence={pay} size={12.5} color="var(--ink-3)" />
                 )}
               </div>
-            );
-          })}
-        </CardContent>
-      </Card>
-
-      {/* Adjustments Section */}
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-lg">Adjustments</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-3 gap-4">
-            <div>
-              <Label className="text-sm">Tax</Label>
-              <Input
-                type="number"
-                value={tax / 100}
-                onChange={(e) =>
-                  setTax(Math.round(parseFloat(e.target.value) * 100))
-                }
-                className="mt-1"
-              />
+              <div
+                style={{
+                  width: 24,
+                  height: 24,
+                  borderRadius: "50%",
+                  border: selected ? "none" : "2px solid var(--hairline-2)",
+                  background: selected ? "var(--brand)" : "transparent",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                {selected && <IconCheck size={15} color="var(--on-brand)" />}
+              </div>
             </div>
-            <div>
-              <Label className="text-sm">Tip</Label>
-              <Input
-                type="number"
-                value={tip / 100}
-                onChange={(e) =>
-                  setTip(Math.round(parseFloat(e.target.value) * 100))
-                }
-                className="mt-1"
-              />
-            </div>
-            <div>
-              <Label className="text-sm">Discount</Label>
-              <Input
-                type="number"
-                value={discount / 100}
-                onChange={(e) =>
-                  setDiscount(Math.round(parseFloat(e.target.value) * 100))
-                }
-                className="mt-1"
-              />
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Balances Summary */}
-      <Card className="bg-blue-50 border-blue-200">
-        <CardHeader>
-          <CardTitle className="text-lg">Who Owes What</CardTitle>
-        </CardHeader>
-        <CardContent>
-          {balances.length === 0 ? (
-            <p className="text-gray-600 text-sm">
-              Everyone is even (or no assignments yet)
-            </p>
-          ) : (
-            <div className="space-y-2">
-              {balances.map((balance, i) => {
-                const fromName = MOCK_MEMBERS.find(
-                  (m) => m.id === balance.fromMemberId,
-                )?.name;
-                const toName = MOCK_MEMBERS.find(
-                  (m) => m.id === balance.toMemberId,
-                )?.name;
-                return (
-                  <div key={i} className="flex justify-between text-sm">
-                    <span>
-                      <strong>{fromName}</strong> owes <strong>{toName}</strong>
-                    </span>
-                    <span className="font-semibold">
-                      {formatCurrency(balance.amount)}
-                    </span>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      {/* Totals Footer */}
-      <Card>
-        <CardContent className="pt-6">
-          <div className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <span>Subtotal:</span>
-              <span>{formatCurrency(MOCK_RECEIPT.subtotal)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Tax:</span>
-              <span>{formatCurrency(tax)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Tip:</span>
-              <span>{formatCurrency(tip)}</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Discount:</span>
-              <span>-{formatCurrency(discount)}</span>
-            </div>
-            <div className="border-t pt-2 flex justify-between font-semibold text-base">
-              <span>Total:</span>
-              <span>
-                {formatCurrency(MOCK_RECEIPT.subtotal + tax + tip - discount)}
-              </span>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Action Buttons */}
-      <div className="flex gap-2">
-        <Button variant="outline" className="flex-1">
-          Cancel
-        </Button>
-        <Button
-          onClick={() => setShowFinalize(true)}
-          className="flex-1 bg-green-600 hover:bg-green-700"
+          );
+        })}
+      </div>
+      <div style={{ padding: "16px 18px 8px" }}>
+        <button
+          onClick={() => onSave(item.id, buildAssignment())}
+          style={{
+            height: 56,
+            width: "100%",
+            borderRadius: 18,
+            background: "var(--brand)",
+            color: "var(--on-brand)",
+            border: "none",
+            fontWeight: 700,
+            fontSize: 17,
+            cursor: "pointer",
+            boxShadow: "var(--shadow-brand)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            gap: 8,
+          }}
         >
-          Finalize Expense
-        </Button>
+          <IconCheck size={20} /> Save assignment
+        </button>
+      </div>
+    </Sheet>
+  );
+}
+
+function SavedScreen({ onContinue }: { onContinue: () => void }) {
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "var(--bg)",
+        display: "flex",
+        flexDirection: "column",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 24,
+        zIndex: 300,
+        animation: "dd-fade .3s ease",
+      }}
+    >
+      <div
+        style={{
+          width: 108,
+          height: 108,
+          borderRadius: "50%",
+          background: "var(--pos)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          animation: "dd-pop .5s cubic-bezier(.2,.9,.3,1) both",
+        }}
+      >
+        <svg width="56" height="56" viewBox="0 0 24 24">
+          <path
+            d="M5 12.5l4.5 4.5L19 7"
+            fill="none"
+            stroke="#053024"
+            strokeWidth="2.6"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            strokeDasharray="60"
+            style={{ animation: "dd-check-draw .5s .2s ease both" }}
+          />
+        </svg>
+      </div>
+      <div>
+        <h1
+          className="dd-display"
+          style={{ fontSize: 28, textAlign: "center", margin: "0 0 8px" }}
+        >
+          Split saved!
+        </h1>
+        <p
+          style={{
+            color: "var(--ink-2)",
+            fontSize: 15.5,
+            fontWeight: 600,
+            textAlign: "center",
+            margin: 0,
+            lineHeight: 1.5,
+          }}
+        >
+          Everyone can see what they owe.
+        </p>
+      </div>
+      <button
+        onClick={onContinue}
+        style={{
+          color: "var(--brand-bright)",
+          background: "none",
+          border: "none",
+          fontWeight: 700,
+          fontSize: 15,
+          cursor: "pointer",
+        }}
+      >
+        Back to group →
+      </button>
+    </div>
+  );
+}
+
+export function ReceiptReview() {
+  const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
+
+  const { data: rawExpense, isLoading } = useGetExpense(id!);
+  const expense = rawExpense as
+    | {
+        id: string;
+        groupId: string;
+        payerId: string;
+        description: string;
+        date: string;
+        status: string;
+        items: ReceiptItem[];
+      }
+    | null
+    | undefined;
+
+  const { data: rawGroup } = useGetGroup(expense?.groupId);
+  const group = rawGroup as
+    | { members: Array<{ id: string; name: string }> }
+    | null
+    | undefined;
+
+  const [localItems, setLocalItems] = useState<ReceiptItem[] | null>(null);
+  const items = useMemo<ReceiptItem[]>(
+    () => localItems ?? expense?.items ?? [],
+    [localItems, expense?.items],
+  );
+
+  const updateAssignment = useUpdateItemAssignment(id!);
+  const finalize = useFinalizeExpense(id!);
+  const [editing, setEditing] = useState<ReceiptItem | null>(null);
+  const [saved, setSaved] = useState(false);
+
+  const members: Member[] = useMemo(
+    () =>
+      (group?.members ?? []).map((m, i) => ({
+        id: m.id,
+        name: m.name,
+        color: memberColor(i),
+      })),
+    [group?.members],
+  );
+  const memberIds = useMemo(() => members.map((m) => m.id), [members]);
+  const split = useMemo(
+    () => computeSplit(items, memberIds),
+    [items, memberIds],
+  );
+  const flagged = items.filter((it) => !it.assignment);
+
+  async function saveAssignment(itemId: string, assignment: ItemAssignment) {
+    const snapshot = localItems ?? expense?.items ?? [];
+    setLocalItems(
+      snapshot.map((it) => (it.id === itemId ? { ...it, assignment } : it)),
+    );
+    setEditing(null);
+    try {
+      await updateAssignment.mutateAsync({ itemId, assignment });
+    } catch {
+      setLocalItems(snapshot);
+    }
+  }
+
+  async function handleFinalize() {
+    await finalize.mutateAsync(memberIds);
+    setSaved(true);
+  }
+
+  if (isLoading) {
+    return (
+      <div
+        style={{
+          height: "100dvh",
+          background: "var(--bg)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+        }}
+      >
+        <p style={{ color: "var(--ink-3)" }}>Loading receipt…</p>
+      </div>
+    );
+  }
+
+  if (!expense) {
+    return (
+      <div
+        style={{
+          height: "100dvh",
+          background: "var(--bg)",
+          display: "flex",
+          flexDirection: "column",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 16,
+        }}
+      >
+        <p style={{ color: "var(--ink-3)" }}>Receipt not found</p>
+        <button
+          onClick={() => navigate(-1)}
+          style={{
+            color: "var(--brand-bright)",
+            background: "none",
+            border: "none",
+            cursor: "pointer",
+            fontWeight: 700,
+          }}
+        >
+          ← Back
+        </button>
+      </div>
+    );
+  }
+
+  if (saved)
+    return (
+      <SavedScreen
+        onContinue={() =>
+          navigate(
+            expense.groupId ? `/groups/${expense.groupId}/balances` : "/",
+            { state: { payerId: expense.payerId } },
+          )
+        }
+      />
+    );
+
+  return (
+    <div
+      style={{
+        height: "100dvh",
+        display: "flex",
+        flexDirection: "column",
+        background: "var(--bg)",
+        position: "relative",
+      }}
+    >
+      <div style={{ height: 58 }} />
+
+      {/* header */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 10,
+          padding: "0 14px 8px",
+        }}
+      >
+        <button
+          onClick={() => navigate(-1)}
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: "50%",
+            background: "var(--surface)",
+            border: "none",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            color: "var(--ink-2)",
+          }}
+        >
+          <IconArrowLeft size={20} />
+        </button>
+        <div style={{ flex: 1, textAlign: "center" }}>
+          <div style={{ fontSize: 16.5, fontWeight: 800 }}>Review & assign</div>
+          <div style={{ fontSize: 12, color: "var(--ink-3)", fontWeight: 600 }}>
+            {expense.description} · you paid
+          </div>
+        </div>
+        <button
+          style={{
+            width: 40,
+            height: 40,
+            borderRadius: 11,
+            background: "var(--surface)",
+            border: "1px solid var(--hairline-2)",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+        >
+          <IconReceipt size={18} color="var(--ink-2)" />
+        </button>
       </div>
 
-      {/* Finalize Confirmation Dialog */}
-      <AlertDialog open={showFinalize} onOpenChange={setShowFinalize}>
-        <AlertDialogContent>
-          <AlertDialogTitle>Finalize Expense?</AlertDialogTitle>
-          <AlertDialogDescription>
-            <div className="space-y-2">
-              <p>Review the balances below and confirm:</p>
-              {balances.map((balance, i) => {
-                const fromName = MOCK_MEMBERS.find(
-                  (m) => m.id === balance.fromMemberId,
-                )?.name;
-                const toName = MOCK_MEMBERS.find(
-                  (m) => m.id === balance.toMemberId,
-                )?.name;
-                return (
-                  <p key={i}>
-                    <strong>{fromName}</strong> → <strong>{toName}</strong>:{" "}
-                    {formatCurrency(balance.amount)}
-                  </p>
-                );
-              })}
-            </div>
-          </AlertDialogDescription>
-          <div className="flex gap-2">
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleFinalize}
-              className="bg-green-600"
-            >
-              Confirm
-            </AlertDialogAction>
+      {/* AI banner */}
+      <div style={{ padding: "0 16px 10px" }}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            background:
+              "linear-gradient(100deg, var(--brand-wash), var(--amber-wash))",
+            border: "1px solid var(--hairline)",
+            borderRadius: 14,
+            padding: "11px 14px",
+          }}
+        >
+          <IconSparkles size={20} color="var(--amber)" />
+          <div style={{ fontSize: 13.5, fontWeight: 700 }}>
+            Review items and assign them to group members
           </div>
-        </AlertDialogContent>
-      </AlertDialog>
+        </div>
+      </div>
+
+      {/* attention banner */}
+      {flagged.length > 0 && (
+        <div style={{ padding: "0 16px 10px" }}>
+          <button
+            onClick={() => setEditing(flagged[0])}
+            style={{
+              width: "100%",
+              display: "flex",
+              alignItems: "center",
+              gap: 11,
+              background: "var(--amber-wash)",
+              border: "1px solid rgba(255,169,104,0.4)",
+              borderRadius: 14,
+              padding: "11px 14px",
+              textAlign: "left",
+              cursor: "pointer",
+            }}
+          >
+            <div
+              style={{
+                width: 30,
+                height: 30,
+                borderRadius: "50%",
+                background: "var(--amber)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                flexShrink: 0,
+              }}
+            >
+              <IconFlag size={16} color="#3A1B02" />
+            </div>
+            <div style={{ flex: 1 }}>
+              <div
+                style={{
+                  fontSize: 14,
+                  fontWeight: 800,
+                  color: "var(--amber-bright)",
+                }}
+              >
+                {flagged.length} item{flagged.length > 1 ? "s" : ""} need
+                assigning
+              </div>
+              <div
+                style={{
+                  fontSize: 12.5,
+                  color: "var(--ink-3)",
+                  fontWeight: 600,
+                }}
+              >
+                Tap to assign
+              </div>
+            </div>
+            <svg
+              width="18"
+              height="18"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="var(--amber-bright)"
+              strokeWidth="1.9"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M9 5l7 7-7 7" />
+            </svg>
+          </button>
+        </div>
+      )}
+
+      {/* items */}
+      <div
+        className="dd-scroll"
+        style={{ flex: 1, overflow: "auto", padding: "0 16px 14px" }}
+      >
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          {items.map((it) => {
+            const unassigned = !it.assignment;
+            return (
+              <button
+                key={it.id}
+                onClick={() => setEditing(it)}
+                style={{
+                  width: "100%",
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 12,
+                  textAlign: "left",
+                  background: "var(--surface)",
+                  borderRadius: "var(--r-md)",
+                  padding: "13px 14px",
+                  border: "1px solid var(--hairline)",
+                  borderLeft: unassigned
+                    ? "3px solid var(--amber)"
+                    : "1px solid var(--hairline)",
+                  cursor: "pointer",
+                }}
+              >
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div style={{ fontSize: 15.5, fontWeight: 700 }}>
+                    {it.quantity > 1 && (
+                      <span
+                        className="dd-num"
+                        style={{
+                          fontSize: 12,
+                          fontWeight: 800,
+                          color: "var(--brand-bright)",
+                          background: "var(--brand-wash)",
+                          padding: "1px 6px",
+                          borderRadius: 6,
+                          marginRight: 6,
+                        }}
+                      >
+                        {it.quantity}×
+                      </span>
+                    )}
+                    {it.description}
+                  </div>
+                  {unassigned ? (
+                    <div
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: 5,
+                        marginTop: 4,
+                        color: "var(--amber-bright)",
+                        fontSize: 12,
+                        fontWeight: 700,
+                      }}
+                    >
+                      <IconFlag size={13} color="var(--amber)" /> Tap to assign
+                    </div>
+                  ) : (
+                    <div
+                      className="dd-num"
+                      style={{
+                        fontSize: 13,
+                        color: "var(--ink-3)",
+                        fontWeight: 600,
+                        marginTop: 2,
+                      }}
+                    >
+                      {fmt(it.unitPrice)}
+                      {it.quantity > 1 ? " each" : ""}
+                    </div>
+                  )}
+                </div>
+                <div
+                  style={{
+                    textAlign: "right",
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "flex-end",
+                    gap: 5,
+                  }}
+                >
+                  <Money pence={it.unitPrice * it.quantity} size={15.5} />
+                  <AssignBadge
+                    assignment={it.assignment}
+                    allMembers={members}
+                  />
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        <div
+          style={{
+            marginTop: 14,
+            background: "var(--surface)",
+            border: "1px solid var(--hairline)",
+            borderRadius: "var(--r-md)",
+            padding: "4px 16px",
+          }}
+        >
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              padding: "11px 0",
+            }}
+          >
+            <span
+              style={{ fontSize: 14.5, fontWeight: 600, color: "var(--ink-2)" }}
+            >
+              Items subtotal
+            </span>
+            <Money pence={split.itemsSubtotal} size={14.5} />
+          </div>
+        </div>
+        <div style={{ height: 8 }} />
+      </div>
+
+      {/* live split bar */}
+      <div
+        style={{
+          borderTop: "1px solid var(--hairline)",
+          background: "var(--bg-2)",
+          boxShadow: "0 -8px 24px rgba(0,0,0,0.3)",
+        }}
+      >
+        <div
+          className="dd-scroll"
+          style={{
+            display: "flex",
+            gap: 9,
+            overflowX: "auto",
+            padding: "12px 16px 4px",
+          }}
+        >
+          {members.map((m) => (
+            <div
+              key={m.id}
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 5,
+                minWidth: 56,
+                flexShrink: 0,
+              }}
+            >
+              <Avatar name={m.name} color={m.color} size={36} />
+              <span
+                style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)" }}
+              >
+                {m.name}
+              </span>
+              <Money pence={split.perPerson[m.id] ?? 0} size={13.5} />
+            </div>
+          ))}
+          {split.unassigned > 0 && (
+            <div
+              style={{
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: 5,
+                minWidth: 56,
+                flexShrink: 0,
+              }}
+            >
+              <div
+                style={{
+                  width: 36,
+                  height: 36,
+                  borderRadius: "50%",
+                  border: "1.6px dashed var(--amber)",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                }}
+              >
+                <IconFlag size={16} color="var(--amber)" />
+              </div>
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: "var(--amber-bright)",
+                }}
+              >
+                none
+              </span>
+              <Money
+                pence={split.unassigned}
+                size={13.5}
+                color="var(--amber-bright)"
+              />
+            </div>
+          )}
+        </div>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 12,
+            padding: "8px 16px 26px",
+          }}
+        >
+          <div>
+            <div
+              style={{ fontSize: 11.5, color: "var(--ink-3)", fontWeight: 700 }}
+            >
+              TOTAL
+            </div>
+            <Money pence={split.total} size={23} />
+          </div>
+          <div style={{ flex: 1 }}>
+            <button
+              onClick={handleFinalize}
+              disabled={
+                split.unassigned > 0 ||
+                finalize.isPending ||
+                expense.status === "finalized"
+              }
+              style={{
+                height: 56,
+                width: "100%",
+                borderRadius: 18,
+                background:
+                  split.unassigned > 0 || expense.status === "finalized"
+                    ? "var(--surface-2)"
+                    : "var(--brand)",
+                color:
+                  split.unassigned > 0 || expense.status === "finalized"
+                    ? "var(--ink-3)"
+                    : "var(--on-brand)",
+                border: "none",
+                fontWeight: 700,
+                fontSize: 17,
+                cursor:
+                  split.unassigned > 0 || expense.status === "finalized"
+                    ? "default"
+                    : "pointer",
+                boxShadow:
+                  split.unassigned > 0 ? "none" : "var(--shadow-brand)",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 8,
+                transition: "all .15s",
+              }}
+            >
+              {expense.status === "finalized" ? (
+                <>
+                  <IconCheck size={20} /> Finalized
+                </>
+              ) : split.unassigned > 0 ? (
+                "Assign all items"
+              ) : finalize.isPending ? (
+                "Saving…"
+              ) : (
+                <>
+                  <IconCheck size={20} /> Confirm & save
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {editing && (
+        <ItemEditor
+          item={editing}
+          allMembers={members}
+          onClose={() => setEditing(null)}
+          onSave={saveAssignment}
+        />
+      )}
     </div>
   );
 }

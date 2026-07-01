@@ -67,7 +67,15 @@ export type ItemAssignment =
 
 export type CustomShare = {
   memberId: MemberId;
-  /** Fraction of the item cost, e.g. 0.5 for 50% */
+  /**
+   * Relative weight of this member's share, normalized across the item's
+   * shares by the split engine — only the ratios matter, not the absolute
+   * magnitude. `[0.5, 0.5]`, `[1, 1]`, and `[3, 3]` all split an item evenly.
+   * The whole item cost is always distributed across the listed shares
+   * (they implicitly sum to the total); to leave part of an item on the
+   * payer, include the payer as one of the shares. Persisted as an integer
+   * `share_weight` in the DB (see packages/db `item_assignments`).
+   */
   fraction: number;
 };
 
