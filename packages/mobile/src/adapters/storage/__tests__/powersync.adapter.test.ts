@@ -29,11 +29,25 @@ type MockDb = {
   getNextCrudTransaction: jest.Mock;
 };
 
-jest.mock("@powersync/react-native", () => ({
-  PowerSyncDatabase: class {
+jest.mock("@powersync/react-native", () => {
+  // Declared *inside* the factory (not hoisted out) for the same reason
+  // explained above — mutated in place so the test file's `import`
+  // binding stays live, letting tests assert how many
+  // `PowerSyncDatabase`s a sequence of `initialize()` calls constructed,
+  // and letting one test force the next instance's `init()` to reject.
+  const instanceCount = { count: 0 };
+  const control = { failNextInit: false };
+
+  class MockPowerSyncDatabase {
     options: unknown;
     currentStatus = { connected: false, connecting: false };
-    init = jest.fn().mockResolvedValue(undefined);
+    init = jest.fn().mockImplementation(() => {
+      if (control.failNextInit) {
+        control.failNextInit = false;
+        return Promise.reject(new Error("network error"));
+      }
+      return Promise.resolve(undefined);
+    });
     connect = jest.fn().mockResolvedValue(undefined);
     disconnectAndClear = jest.fn().mockResolvedValue(undefined);
     registerListener = jest.fn().mockReturnValue(jest.fn());
@@ -43,9 +57,16 @@ jest.mock("@powersync/react-native", () => ({
 
     constructor(options: unknown) {
       this.options = options;
+      instanceCount.count++;
     }
-  },
-}));
+  }
+
+  return {
+    PowerSyncDatabase: MockPowerSyncDatabase,
+    __instanceCount: instanceCount,
+    __control: control,
+  };
+});
 
 jest.mock("@/adapters/powersync", () => ({
   AppSchema: { __fake: "schema" },
@@ -57,11 +78,23 @@ jest.mock("@/adapters/powersync", () => ({
 // eslint-disable-next-line import/first
 import type { SupabaseAuthAdapter } from "@/adapters/auth";
 // eslint-disable-next-line import/first
+import * as PowerSyncReactNative from "@powersync/react-native";
+// eslint-disable-next-line import/first
 import { PowerSyncStorageAdapter } from "../powersync.adapter";
 
 const fakeAuth = {} as unknown as SupabaseAuthAdapter;
+const { __instanceCount: instanceCount, __control: control } =
+  PowerSyncReactNative as unknown as {
+    __instanceCount: { count: number };
+    __control: { failNextInit: boolean };
+  };
 
 describe("PowerSyncStorageAdapter", () => {
+  beforeEach(() => {
+    instanceCount.count = 0;
+    control.failNextInit = false;
+  });
+
   describe("initialize", () => {
     it("opens the local DB (per AppSchema) and connects it", async () => {
       const adapter = new PowerSyncStorageAdapter(fakeAuth, "https://sync");
@@ -87,6 +120,54 @@ describe("PowerSyncStorageAdapter", () => {
       await adapter.initialize();
 
       expect(adapter.getDb()).toBe(firstDb);
+      expect(instanceCount.count).toBe(1);
+    });
+
+    it("de-dupes concurrent callers into a single connection attempt", async () => {
+      // Regression: `AppProviders`'s boot effect and `useAuth` reacting to
+      // the just-bootstrapped session both call `initialize()` around the
+      // same tick. Without in-flight de-duping, both would race past the
+      // (then-synchronous) `if (this.db) return` guard and construct two
+      // separate `PowerSyncDatabase`s.
+      const adapter = new PowerSyncStorageAdapter(fakeAuth, "https://sync");
+
+      const [dbA, dbB] = await Promise.all([
+        adapter.initialize().then(() => adapter.getDb()),
+        adapter.initialize().then(() => adapter.getDb()),
+      ]);
+
+      expect(dbA).toBe(dbB);
+      expect(instanceCount.count).toBe(1);
+    });
+
+    it("re-opens a fresh DB after clearAll() (sign-out then sign-in)", async () => {
+      // Regression: PowerSync's connection, unlike a bare SQLite handle,
+      // must be re-established after `clearAll()` — otherwise every local
+      // read/write throws forever on the next sign-in in the same app
+      // session (see `useAuth`'s `reinitStorage`).
+      const adapter = new PowerSyncStorageAdapter(fakeAuth, "https://sync");
+
+      await adapter.initialize();
+      const firstDb = adapter.getDb();
+      adapter.clearAll();
+      expect(() => adapter.getDb()).toThrow(/initialize/);
+
+      await adapter.initialize();
+
+      expect(adapter.getDb()).not.toBe(firstDb);
+      expect(instanceCount.count).toBe(2);
+    });
+
+    it("does not permanently cache a failed connection attempt", async () => {
+      const adapter = new PowerSyncStorageAdapter(fakeAuth, "https://sync");
+      control.failNextInit = true;
+
+      await expect(adapter.initialize()).rejects.toThrow("network error");
+      expect(() => adapter.getDb()).toThrow(/initialize/);
+
+      await expect(adapter.initialize()).resolves.toBeUndefined();
+      expect(adapter.getDb()).toBeTruthy();
+      expect(instanceCount.count).toBe(2);
     });
   });
 

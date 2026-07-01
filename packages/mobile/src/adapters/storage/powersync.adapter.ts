@@ -13,7 +13,9 @@ const DB_FILENAME = "divvyup.db";
  * opens the local SQLite DB (per `AppSchema`) and connects it to Supabase
  * via `PowerSyncSupabaseConnector`, so local reads/writes work offline and
  * sync bidirectionally when online. `clearAll()` (sign-out / account
- * delete) disconnects and wipes the local DB.
+ * delete) disconnects and wipes the local DB — callers (see `useAuth`) are
+ * expected to call `initialize()` again on the next sign-in, since a fresh
+ * session needs a fresh PowerSync connection.
  *
  * The `@azure/core-asynciterator-polyfill` side-effect import is required
  * by PowerSync's watched queries (`db.watch()`), which use async
@@ -21,15 +23,31 @@ const DB_FILENAME = "divvyup.db";
  */
 export class PowerSyncStorageAdapter implements StoragePort {
   private db: PowerSyncDatabase | null = null;
+  // Caches the in-flight/completed init so concurrent callers (app-boot
+  // mount effect + useAuth reacting to the bootstrapped session, both of
+  // which call `initialize()`) share one connection attempt instead of
+  // racing to construct two `PowerSyncDatabase`s. Cleared on `clearAll()`
+  // (and on failure) so the *next* `initialize()` call actually re-runs.
+  private initPromise: Promise<void> | null = null;
 
   constructor(
     private readonly auth: SupabaseAuthAdapter,
     private readonly powersyncUrl: string,
   ) {}
 
-  async initialize(): Promise<void> {
-    if (this.db) return;
+  initialize(): Promise<void> {
+    if (!this.initPromise) {
+      this.initPromise = this.doInitialize().catch((err) => {
+        // Let a failed attempt be retried by a later `initialize()` call
+        // instead of permanently caching the rejection.
+        this.initPromise = null;
+        throw err;
+      });
+    }
+    return this.initPromise;
+  }
 
+  private async doInitialize(): Promise<void> {
     const db = new PowerSyncDatabase({
       schema: AppSchema,
       database: { dbFilename: DB_FILENAME },
@@ -52,6 +70,7 @@ export class PowerSyncStorageAdapter implements StoragePort {
   clearAll(): void {
     const db = this.db;
     this.db = null;
+    this.initPromise = null;
     if (!db) return;
     // Fire-and-forget: sign-out shouldn't block on network teardown, and
     // StoragePort#clearAll is synchronous by contract.
