@@ -1,0 +1,59 @@
+{
+  "$schema": "https://json.schemastore.org/eas.json",
+  "cli": {
+    "version": ">= 7.0.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "staging": {
+      "distribution": "store",
+      "channel": "staging",
+      "environment": "preview",
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api.staging.divvyup.example.com",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://your-staging-project.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "your-staging-anon-key"
+      },
+      "ios": {
+        "resourceClass": "m-medium"
+      },
+      "android": {
+        "resourceClass": "medium",
+        "buildType": "app-bundle"
+      }
+    },
+    "production": {
+      "distribution": "store",
+      "channel": "production",
+      "environment": "production",
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://api.divvyup.example.com",
+        "EXPO_PUBLIC_SUPABASE_URL": "https://your-production-project.supabase.co",
+        "EXPO_PUBLIC_SUPABASE_ANON_KEY": "your-production-anon-key"
+      },
+      "ios": {
+        "resourceClass": "m-medium"
+      },
+      "android": {
+        "resourceClass": "medium",
+        "buildType": "app-bundle"
+      }
+    }
+  },
+  "submit": {
+    "staging": {
+      "ios": {
+        "ascAppId": "",
+        "appleTeamId": ""
+      }
+    },
+    "production": {
+      "ios": {
+        "ascAppId": "",
+        "appleTeamId": ""
+      }
+    }
+  }
+}
