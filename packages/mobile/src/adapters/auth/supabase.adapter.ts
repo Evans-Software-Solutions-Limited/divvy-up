@@ -94,6 +94,16 @@ export class SupabaseAuthAdapter implements AuthPort {
   }
 
   /**
+   * The underlying Supabase client. Exposed so other adapters that need
+   * Supabase (e.g. the PowerSync connector's `uploadData`, which writes
+   * CRUD ops via `supabase-js`) can reuse this single authenticated client
+   * instead of constructing a second one.
+   */
+  getClient(): SupabaseClient {
+    return this.client;
+  }
+
+  /**
    * Clean up the AppState listener. Call when the adapter is being discarded
    * (e.g. in a useEffect cleanup or on hot reload).
    */

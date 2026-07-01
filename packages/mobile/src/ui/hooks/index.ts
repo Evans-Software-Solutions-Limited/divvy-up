@@ -1,6 +1,7 @@
 export { useAdapters, AdapterProvider } from "./useAdapters";
 export { useAuth, type AuthState } from "./useAuth";
 export { useOnlineStatus } from "./useOnlineStatus";
+export { useSyncStatus, type SyncStatusSnapshot } from "./useSyncStatus";
 export { useDebouncedValue } from "./useDebouncedValue";
 export {
   useBrandTitleStyle,
