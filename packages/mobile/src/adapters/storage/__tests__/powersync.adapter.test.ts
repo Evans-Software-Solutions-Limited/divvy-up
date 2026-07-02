@@ -36,7 +36,10 @@ jest.mock("@powersync/react-native", () => {
   // `PowerSyncDatabase`s a sequence of `initialize()` calls constructed,
   // and letting one test force the next instance's `init()` to reject.
   const instanceCount = { count: 0 };
-  const control = { failNextInit: false };
+  const control: {
+    failNextInit: boolean;
+    teardownPromise: Promise<void> | null;
+  } = { failNextInit: false, teardownPromise: null };
 
   class MockPowerSyncDatabase {
     options: unknown;
@@ -49,7 +52,9 @@ jest.mock("@powersync/react-native", () => {
       return Promise.resolve(undefined);
     });
     connect = jest.fn().mockResolvedValue(undefined);
-    disconnectAndClear = jest.fn().mockResolvedValue(undefined);
+    disconnectAndClear = jest
+      .fn()
+      .mockImplementation(() => control.teardownPromise ?? Promise.resolve());
     registerListener = jest.fn().mockReturnValue(jest.fn());
     execute = jest.fn().mockResolvedValue({ rowsAffected: 1 });
     getAll = jest.fn().mockResolvedValue([]);
@@ -86,13 +91,24 @@ const fakeAuth = {} as unknown as SupabaseAuthAdapter;
 const { __instanceCount: instanceCount, __control: control } =
   PowerSyncReactNative as unknown as {
     __instanceCount: { count: number };
-    __control: { failNextInit: boolean };
+    __control: { failNextInit: boolean; teardownPromise: Promise<void> | null };
   };
+
+// Flush a handful of microtask turns — enough for the
+// `disconnectAndClear().catch().finally()` chain plus the
+// `await this.teardownPromise` hop in `doInitialize()` to settle without
+// resolving the teardown itself.
+async function flushMicrotasks(turns = 4) {
+  for (let i = 0; i < turns; i++) {
+    await Promise.resolve();
+  }
+}
 
 describe("PowerSyncStorageAdapter", () => {
   beforeEach(() => {
     instanceCount.count = 0;
     control.failNextInit = false;
+    control.teardownPromise = null;
   });
 
   describe("initialize", () => {
@@ -158,6 +174,34 @@ describe("PowerSyncStorageAdapter", () => {
       expect(instanceCount.count).toBe(2);
     });
 
+    it("waits for a pending clearAll() teardown before opening a new DB", async () => {
+      // Regression: a fast sign-out → sign-in must not open a *new*
+      // `PowerSyncDatabase` against the same SQLite file while the old
+      // one's `disconnectAndClear()` is still tearing it down — that risks
+      // a locked-database error or the stale teardown wiping tables the
+      // new instance has already synced into.
+      const adapter = new PowerSyncStorageAdapter(fakeAuth, "https://sync");
+      await adapter.initialize();
+      expect(instanceCount.count).toBe(1);
+
+      let resolveTeardown: () => void = () => {};
+      control.teardownPromise = new Promise<void>((resolve) => {
+        resolveTeardown = resolve;
+      });
+
+      adapter.clearAll();
+      const reinit = adapter.initialize();
+
+      // Teardown hasn't resolved yet — the new DB must not open early.
+      await flushMicrotasks();
+      expect(instanceCount.count).toBe(1);
+
+      resolveTeardown();
+      await reinit;
+
+      expect(instanceCount.count).toBe(2);
+    });
+
     it("does not permanently cache a failed connection attempt", async () => {
       const adapter = new PowerSyncStorageAdapter(fakeAuth, "https://sync");
       control.failNextInit = true;
@@ -212,10 +256,47 @@ describe("PowerSyncStorageAdapter", () => {
       expect(adapter.getStatus()).toBeNull();
     });
 
-    it("is a no-op unsubscribe before initialize()", () => {
+    it("unsubscribing before initialize() never throws", () => {
       const adapter = new PowerSyncStorageAdapter(fakeAuth, "https://sync");
       const unsubscribe = adapter.subscribeStatus(jest.fn());
       expect(() => unsubscribe()).not.toThrow();
+    });
+
+    it("delivers the eventual status to a listener that subscribed before initialize() resolved", async () => {
+      // Regression: `useSyncStatus`'s effect can run before `AppProviders`'
+      // own effect calls `initialize()` (children's effects fire before
+      // parents' on mount) — e.g. `sync-blocked.tsx` mounted directly via a
+      // deep link at cold boot. The listener must not be silently dropped.
+      const adapter = new PowerSyncStorageAdapter(fakeAuth, "https://sync");
+      const callback = jest.fn();
+
+      const unsubscribe = adapter.subscribeStatus(callback);
+      expect(callback).not.toHaveBeenCalled();
+
+      await adapter.initialize();
+
+      expect(callback).toHaveBeenCalledWith(
+        expect.objectContaining({ connected: false }),
+      );
+
+      const db = adapter.getDb() as unknown as MockDb;
+      const { statusChanged } = db.registerListener.mock.calls[0][0];
+      callback.mockClear();
+      statusChanged({ connected: true });
+      expect(callback).toHaveBeenCalledWith({ connected: true });
+
+      unsubscribe();
+    });
+
+    it("does not attach a listener that unsubscribed while still pending", async () => {
+      const adapter = new PowerSyncStorageAdapter(fakeAuth, "https://sync");
+      const callback = jest.fn();
+
+      const unsubscribe = adapter.subscribeStatus(callback);
+      unsubscribe();
+      await adapter.initialize();
+
+      expect(callback).not.toHaveBeenCalled();
     });
 
     it("returns the DB's currentStatus after initialize()", async () => {

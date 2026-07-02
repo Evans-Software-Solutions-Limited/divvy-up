@@ -3,7 +3,11 @@
 # Scopes each device to the authed user's own groups: every stream below
 # joins back through `group_members` to the caller's `auth.user_id()` (the
 # Supabase JWT `sub`), so a user only ever receives rows for groups they
-# belong to.
+# belong to. Every such join also requires `active = true` — PowerSync's
+# down-sync bypasses Postgres RLS, so this is the *only* gate stopping a
+# user who has been removed from a group (soft-deleted via
+# `group_members.active`, see packages/db/src/schema.ts) from continuing
+# to receive that group's future updates forever.
 #
 # NOTE on divergence from the original brief: the brief (and PowerSync's
 # *legacy* `bucket_definitions` sync rules) called this file
@@ -33,7 +37,7 @@ streams:
     query: |
       SELECT g.* FROM groups g
       INNER JOIN group_members gm ON gm.group_id = g.id
-      WHERE gm.user_id = auth.user_id()
+      WHERE gm.user_id = auth.user_id() AND gm.active = true
 
   # All members (including placeholders) of those groups.
   my_group_members:
@@ -41,7 +45,7 @@ streams:
     query: |
       SELECT gm.* FROM group_members gm
       WHERE gm.group_id IN (
-        SELECT group_id FROM group_members WHERE user_id = auth.user_id()
+        SELECT group_id FROM group_members WHERE user_id = auth.user_id() AND active = true
       )
 
   # Expenses within those groups.
@@ -50,7 +54,7 @@ streams:
     query: |
       SELECT e.* FROM expenses e
       WHERE e.group_id IN (
-        SELECT group_id FROM group_members WHERE user_id = auth.user_id()
+        SELECT group_id FROM group_members WHERE user_id = auth.user_id() AND active = true
       )
 
   # Receipt line items on those expenses.
@@ -60,7 +64,7 @@ streams:
       SELECT ri.* FROM receipt_items ri
       WHERE ri.expense_id IN (
         SELECT id FROM expenses WHERE group_id IN (
-          SELECT group_id FROM group_members WHERE user_id = auth.user_id()
+          SELECT group_id FROM group_members WHERE user_id = auth.user_id() AND active = true
         )
       )
 
@@ -72,7 +76,7 @@ streams:
       WHERE ia.item_id IN (
         SELECT id FROM receipt_items WHERE expense_id IN (
           SELECT id FROM expenses WHERE group_id IN (
-            SELECT group_id FROM group_members WHERE user_id = auth.user_id()
+            SELECT group_id FROM group_members WHERE user_id = auth.user_id() AND active = true
           )
         )
       )
@@ -84,7 +88,7 @@ streams:
       SELECT ra.* FROM receipt_adjustments ra
       WHERE ra.expense_id IN (
         SELECT id FROM expenses WHERE group_id IN (
-          SELECT group_id FROM group_members WHERE user_id = auth.user_id()
+          SELECT group_id FROM group_members WHERE user_id = auth.user_id() AND active = true
         )
       )
 
@@ -94,5 +98,5 @@ streams:
     query: |
       SELECT s.* FROM settlements s
       WHERE s.group_id IN (
-        SELECT group_id FROM group_members WHERE user_id = auth.user_id()
+        SELECT group_id FROM group_members WHERE user_id = auth.user_id() AND active = true
       )

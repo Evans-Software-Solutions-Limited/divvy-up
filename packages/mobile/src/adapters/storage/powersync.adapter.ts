@@ -21,6 +21,12 @@ const DB_FILENAME = "divvyup.db";
  * by PowerSync's watched queries (`db.watch()`), which use async
  * generators — see the RN/Expo setup docs.
  */
+type PendingStatusListener = {
+  callback: (status: SyncStatus) => void;
+  unsubscribe: (() => void) | null;
+  cancelled: boolean;
+};
+
 export class PowerSyncStorageAdapter implements StoragePort {
   private db: PowerSyncDatabase | null = null;
   // Caches the in-flight/completed init so concurrent callers (app-boot
@@ -29,6 +35,14 @@ export class PowerSyncStorageAdapter implements StoragePort {
   // racing to construct two `PowerSyncDatabase`s. Cleared on `clearAll()`
   // (and on failure) so the *next* `initialize()` call actually re-runs.
   private initPromise: Promise<void> | null = null;
+  // Set by `clearAll()` while `disconnectAndClear()` is still tearing down
+  // the previous connection; `doInitialize()` waits for it so a fast
+  // sign-out → sign-in can't open a *new* `PowerSyncDatabase` against the
+  // same SQLite file while the old one is still closing/wiping it.
+  private teardownPromise: Promise<void> | null = null;
+  // `subscribeStatus()` callers that arrived before `this.db` existed —
+  // attached for real once `doInitialize()` completes.
+  private pendingStatusListeners = new Set<PendingStatusListener>();
 
   constructor(
     private readonly auth: SupabaseAuthAdapter,
@@ -48,6 +62,10 @@ export class PowerSyncStorageAdapter implements StoragePort {
   }
 
   private async doInitialize(): Promise<void> {
+    if (this.teardownPromise) {
+      await this.teardownPromise;
+    }
+
     const db = new PowerSyncDatabase({
       schema: AppSchema,
       database: { dbFilename: DB_FILENAME },
@@ -65,6 +83,17 @@ export class PowerSyncStorageAdapter implements StoragePort {
     await db.connect(connector);
 
     this.db = db;
+
+    // Attach anyone who called `subscribeStatus()` before `db` existed —
+    // fire once with the just-connected status, then live-update.
+    for (const listener of this.pendingStatusListeners) {
+      if (listener.cancelled) continue;
+      listener.callback(db.currentStatus);
+      listener.unsubscribe = db.registerListener({
+        statusChanged: (status) => listener.callback(status),
+      });
+    }
+    this.pendingStatusListeners.clear();
   }
 
   clearAll(): void {
@@ -72,14 +101,21 @@ export class PowerSyncStorageAdapter implements StoragePort {
     this.db = null;
     this.initPromise = null;
     if (!db) return;
-    // Fire-and-forget: sign-out shouldn't block on network teardown, and
-    // StoragePort#clearAll is synchronous by contract.
-    db.disconnectAndClear().catch((err) => {
-      console.error(
-        "[PowerSyncStorageAdapter] Failed to clear local data:",
-        err,
-      );
-    });
+    // Not awaited — sign-out shouldn't block on network teardown, and
+    // StoragePort#clearAll is synchronous by contract. `doInitialize()`
+    // awaits this same promise, so a re-`initialize()` right behind this
+    // call still waits for the teardown instead of racing it.
+    this.teardownPromise = db
+      .disconnectAndClear()
+      .catch((err) => {
+        console.error(
+          "[PowerSyncStorageAdapter] Failed to clear local data:",
+          err,
+        );
+      })
+      .finally(() => {
+        this.teardownPromise = null;
+      });
   }
 
   /**
@@ -102,15 +138,28 @@ export class PowerSyncStorageAdapter implements StoragePort {
 
   /**
    * Subscribe to connection/sync status changes (e.g. to drive an
-   * offline/blocked-sync banner). Returns an unsubscribe function; a no-op
-   * if called before `initialize()`.
+   * offline/blocked-sync banner). Returns an unsubscribe function. Safe to
+   * call before `initialize()` resolves (or before it's even been called)
+   * — the listener is queued and attached once the DB is ready, instead of
+   * being silently dropped.
    */
   subscribeStatus(callback: (status: SyncStatus) => void): () => void {
-    if (!this.db) {
-      return () => {};
+    if (this.db) {
+      return this.db.registerListener({
+        statusChanged: (status) => callback(status),
+      });
     }
-    return this.db.registerListener({
-      statusChanged: (status) => callback(status),
-    });
+
+    const listener: PendingStatusListener = {
+      callback,
+      unsubscribe: null,
+      cancelled: false,
+    };
+    this.pendingStatusListeners.add(listener);
+    return () => {
+      listener.cancelled = true;
+      this.pendingStatusListeners.delete(listener);
+      listener.unsubscribe?.();
+    };
   }
 }
