@@ -6,6 +6,11 @@ import type { StoragePort } from "@/domain/ports/storage.port";
 
 const DB_FILENAME = "divvyup.db";
 
+type StatusListener = {
+  callback: (status: SyncStatus) => void;
+  rawUnsubscribe: (() => void) | null;
+};
+
 /**
  * PowerSync-backed on-device storage adapter for the Divvy Up shell.
  *
@@ -17,32 +22,39 @@ const DB_FILENAME = "divvyup.db";
  * expected to call `initialize()` again on the next sign-in, since a fresh
  * session needs a fresh PowerSync connection.
  *
+ * Two things make that re-init safe against a fast sign-out ↔ sign-in
+ * cycle:
+ * - `epoch` is bumped by every `clearAll()`. A `doInitialize()` call that
+ *   was already opening/connecting when `clearAll()` fires notices its
+ *   captured epoch is stale (checked both before opening and again after
+ *   `connect()`), and discards the connection it just built instead of
+ *   installing it — otherwise `clearAll()` firing mid-open would see
+ *   nothing to tear down yet, and the stale open would resurrect a
+ *   connection for a session that's already gone.
+ * - `chain` serializes every open/close attempt so at most one is ever in
+ *   flight, so two `initialize()` calls (or an `initialize()` racing a
+ *   `clearAll()`'s teardown) can't open two `PowerSyncDatabase`s against
+ *   the same SQLite file at once.
+ * `this.db` itself is still nulled out (and status listeners detached)
+ * *synchronously* inside `clearAll()`, before any of that async
+ * sequencing — so `getDb()`/`getStatus()` reflect the sign-out
+ * immediately, even though the underlying network teardown is
+ * best-effort and sequenced behind the scenes.
+ *
  * The `@azure/core-asynciterator-polyfill` side-effect import is required
  * by PowerSync's watched queries (`db.watch()`), which use async
  * generators — see the RN/Expo setup docs.
  */
-type PendingStatusListener = {
-  callback: (status: SyncStatus) => void;
-  unsubscribe: (() => void) | null;
-  cancelled: boolean;
-};
-
 export class PowerSyncStorageAdapter implements StoragePort {
   private db: PowerSyncDatabase | null = null;
-  // Caches the in-flight/completed init so concurrent callers (app-boot
-  // mount effect + useAuth reacting to the bootstrapped session, both of
-  // which call `initialize()`) share one connection attempt instead of
-  // racing to construct two `PowerSyncDatabase`s. Cleared on `clearAll()`
-  // (and on failure) so the *next* `initialize()` call actually re-runs.
-  private initPromise: Promise<void> | null = null;
-  // Set by `clearAll()` while `disconnectAndClear()` is still tearing down
-  // the previous connection; `doInitialize()` waits for it so a fast
-  // sign-out → sign-in can't open a *new* `PowerSyncDatabase` against the
-  // same SQLite file while the old one is still closing/wiping it.
-  private teardownPromise: Promise<void> | null = null;
-  // `subscribeStatus()` callers that arrived before `this.db` existed —
-  // attached for real once `doInitialize()` completes.
-  private pendingStatusListeners = new Set<PendingStatusListener>();
+  private epoch = 0;
+  private chain: Promise<void> = Promise.resolve();
+  // Tracked for the adapter's whole lifetime (not just "before the first
+  // DB exists") so a listener subscribed against one DB is automatically
+  // re-attached to whichever DB replaces it after a clearAll() + re-init —
+  // otherwise a still-mounted subscriber would be stuck listening to a
+  // disconnected, torn-down instance forever.
+  private statusListeners = new Set<StatusListener>();
 
   constructor(
     private readonly auth: SupabaseAuthAdapter,
@@ -50,21 +62,18 @@ export class PowerSyncStorageAdapter implements StoragePort {
   ) {}
 
   initialize(): Promise<void> {
-    if (!this.initPromise) {
-      this.initPromise = this.doInitialize().catch((err) => {
-        // Let a failed attempt be retried by a later `initialize()` call
-        // instead of permanently caching the rejection.
-        this.initPromise = null;
-        throw err;
-      });
-    }
-    return this.initPromise;
+    const epoch = this.epoch;
+    const result = this.chain.then(() => this.doInitialize(epoch));
+    // The stored chain must never become a permanently-rejected promise —
+    // that would make every future `.then()` off it (from this call or
+    // `clearAll()`) short-circuit without running. Swallow failures there;
+    // the caller's own `result` promise still rejects normally.
+    this.chain = result.catch(() => undefined);
+    return result;
   }
 
-  private async doInitialize(): Promise<void> {
-    if (this.teardownPromise) {
-      await this.teardownPromise;
-    }
+  private async doInitialize(epoch: number): Promise<void> {
+    if (this.db || epoch !== this.epoch) return;
 
     const db = new PowerSyncDatabase({
       schema: AppSchema,
@@ -82,39 +91,55 @@ export class PowerSyncStorageAdapter implements StoragePort {
     // call before the user is signed in (e.g. app boot on a fresh install).
     await db.connect(connector);
 
+    if (epoch !== this.epoch) {
+      // A clearAll() fired while we were opening/connecting — this
+      // connection is for a session that's already gone. Discard it
+      // instead of installing it into `this.db`.
+      await db.disconnectAndClear().catch((err) => {
+        console.error(
+          "[PowerSyncStorageAdapter] Failed to discard a stale connection:",
+          err,
+        );
+      });
+      return;
+    }
+
     this.db = db;
 
-    // Attach anyone who called `subscribeStatus()` before `db` existed —
-    // fire once with the just-connected status, then live-update.
-    for (const listener of this.pendingStatusListeners) {
-      if (listener.cancelled) continue;
+    // (Re)attach every registered listener to this DB — covers both
+    // "subscribed before any DB existed" and "subscribed to a previous DB
+    // that clearAll() tore down".
+    for (const listener of this.statusListeners) {
       listener.callback(db.currentStatus);
-      listener.unsubscribe = db.registerListener({
+      listener.rawUnsubscribe = db.registerListener({
         statusChanged: (status) => listener.callback(status),
       });
     }
-    this.pendingStatusListeners.clear();
   }
 
   clearAll(): void {
+    this.epoch++;
     const db = this.db;
     this.db = null;
-    this.initPromise = null;
+    // Detach from the dying DB immediately — `doInitialize()` re-attaches
+    // to whatever DB comes next.
+    for (const listener of this.statusListeners) {
+      listener.rawUnsubscribe?.();
+      listener.rawUnsubscribe = null;
+    }
     if (!db) return;
-    // Not awaited — sign-out shouldn't block on network teardown, and
-    // StoragePort#clearAll is synchronous by contract. `doInitialize()`
-    // awaits this same promise, so a re-`initialize()` right behind this
-    // call still waits for the teardown instead of racing it.
-    this.teardownPromise = db
-      .disconnectAndClear()
+    // Sequenced behind `chain` (not necessarily synchronous) — this way a
+    // `doInitialize()` still opening this same `db` can't have its
+    // eventual `disconnectAndClear()` race this one, and a subsequent
+    // `initialize()` queued right after this call waits its turn behind
+    // this teardown instead of opening a new DB while it's still running.
+    this.chain = this.chain
+      .then(() => db.disconnectAndClear())
       .catch((err) => {
         console.error(
           "[PowerSyncStorageAdapter] Failed to clear local data:",
           err,
         );
-      })
-      .finally(() => {
-        this.teardownPromise = null;
       });
   }
 
@@ -139,27 +164,22 @@ export class PowerSyncStorageAdapter implements StoragePort {
   /**
    * Subscribe to connection/sync status changes (e.g. to drive an
    * offline/blocked-sync banner). Returns an unsubscribe function. Safe to
-   * call before `initialize()` resolves (or before it's even been called)
-   * — the listener is queued and attached once the DB is ready, instead of
-   * being silently dropped.
+   * call before `initialize()` resolves (or before it's even been called),
+   * and keeps working across a `clearAll()` + re-`initialize()` cycle —
+   * the listener follows whichever DB is currently live instead of being
+   * bound to a single instance.
    */
   subscribeStatus(callback: (status: SyncStatus) => void): () => void {
+    const listener: StatusListener = { callback, rawUnsubscribe: null };
     if (this.db) {
-      return this.db.registerListener({
+      listener.rawUnsubscribe = this.db.registerListener({
         statusChanged: (status) => callback(status),
       });
     }
-
-    const listener: PendingStatusListener = {
-      callback,
-      unsubscribe: null,
-      cancelled: false,
-    };
-    this.pendingStatusListeners.add(listener);
+    this.statusListeners.add(listener);
     return () => {
-      listener.cancelled = true;
-      this.pendingStatusListeners.delete(listener);
-      listener.unsubscribe?.();
+      this.statusListeners.delete(listener);
+      listener.rawUnsubscribe?.();
     };
   }
 }

@@ -36,10 +36,12 @@ jest.mock("@powersync/react-native", () => {
   // `PowerSyncDatabase`s a sequence of `initialize()` calls constructed,
   // and letting one test force the next instance's `init()` to reject.
   const instanceCount = { count: 0 };
+  const instances: unknown[] = [];
   const control: {
     failNextInit: boolean;
     teardownPromise: Promise<void> | null;
-  } = { failNextInit: false, teardownPromise: null };
+    connectPromise: Promise<void> | null;
+  } = { failNextInit: false, teardownPromise: null, connectPromise: null };
 
   class MockPowerSyncDatabase {
     options: unknown;
@@ -51,11 +53,23 @@ jest.mock("@powersync/react-native", () => {
       }
       return Promise.resolve(undefined);
     });
-    connect = jest.fn().mockResolvedValue(undefined);
+    connect = jest
+      .fn()
+      .mockImplementation(() => control.connectPromise ?? Promise.resolve());
     disconnectAndClear = jest
       .fn()
       .mockImplementation(() => control.teardownPromise ?? Promise.resolve());
-    registerListener = jest.fn().mockReturnValue(jest.fn());
+    // Unlike a real listener registry, the returned unsubscribe clears the
+    // *same* listener object callers extract via `mock.calls[n][0]` — so
+    // tests calling `unsubscribe()` and then re-reading `.statusChanged`
+    // (not a value destructured beforehand) see it actually detached.
+    registerListener = jest
+      .fn()
+      .mockImplementation((listener: { statusChanged?: unknown }) => {
+        return () => {
+          listener.statusChanged = undefined;
+        };
+      });
     execute = jest.fn().mockResolvedValue({ rowsAffected: 1 });
     getAll = jest.fn().mockResolvedValue([]);
     getNextCrudTransaction = jest.fn().mockResolvedValue(null);
@@ -63,12 +77,14 @@ jest.mock("@powersync/react-native", () => {
     constructor(options: unknown) {
       this.options = options;
       instanceCount.count++;
+      instances.push(this);
     }
   }
 
   return {
     PowerSyncDatabase: MockPowerSyncDatabase,
     __instanceCount: instanceCount,
+    __instances: instances,
     __control: control,
   };
 });
@@ -88,16 +104,23 @@ import * as PowerSyncReactNative from "@powersync/react-native";
 import { PowerSyncStorageAdapter } from "../powersync.adapter";
 
 const fakeAuth = {} as unknown as SupabaseAuthAdapter;
-const { __instanceCount: instanceCount, __control: control } =
-  PowerSyncReactNative as unknown as {
-    __instanceCount: { count: number };
-    __control: { failNextInit: boolean; teardownPromise: Promise<void> | null };
+const {
+  __instanceCount: instanceCount,
+  __instances: instances,
+  __control: control,
+} = PowerSyncReactNative as unknown as {
+  __instanceCount: { count: number };
+  __instances: MockDb[];
+  __control: {
+    failNextInit: boolean;
+    teardownPromise: Promise<void> | null;
+    connectPromise: Promise<void> | null;
   };
+};
 
-// Flush a handful of microtask turns — enough for the
-// `disconnectAndClear().catch().finally()` chain plus the
-// `await this.teardownPromise` hop in `doInitialize()` to settle without
-// resolving the teardown itself.
+// Flush a handful of microtask turns — enough for the chained
+// `.then()`/`.catch()` hops in `initialize()`/`clearAll()` to settle
+// without resolving any manually-controlled deferred promise.
 async function flushMicrotasks(turns = 4) {
   for (let i = 0; i < turns; i++) {
     await Promise.resolve();
@@ -107,8 +130,10 @@ async function flushMicrotasks(turns = 4) {
 describe("PowerSyncStorageAdapter", () => {
   beforeEach(() => {
     instanceCount.count = 0;
+    instances.length = 0;
     control.failNextInit = false;
     control.teardownPromise = null;
+    control.connectPromise = null;
   });
 
   describe("initialize", () => {
@@ -200,6 +225,49 @@ describe("PowerSyncStorageAdapter", () => {
       await reinit;
 
       expect(instanceCount.count).toBe(2);
+    });
+
+    it("discards a stale connection instead of installing it when clearAll() fires mid-open", async () => {
+      // Regression: `clearAll()` firing while an `initialize()` was still
+      // opening/connecting used to see `this.db === null` (nothing to
+      // tear down yet), no-op, and then get clobbered when that stale
+      // open finished and installed a connection for a session that was
+      // supposed to be gone. A fresh `initialize()` called right behind
+      // that `clearAll()` must also not race ahead and open a *second*
+      // DB while the stale one is still resolving.
+      const adapter = new PowerSyncStorageAdapter(fakeAuth, "https://sync");
+
+      let resolveConnect: () => void = () => {};
+      control.connectPromise = new Promise<void>((resolve) => {
+        resolveConnect = resolve;
+      });
+
+      const staleInit = adapter.initialize();
+      await flushMicrotasks();
+      expect(instanceCount.count).toBe(1); // db #1 built, stuck mid-connect
+
+      adapter.clearAll(); // nothing live yet — this.db was already null
+      expect(() => adapter.getDb()).toThrow(/initialize/);
+
+      const reinit = adapter.initialize();
+      await flushMicrotasks();
+      // The re-init must wait its turn behind the still-resolving stale
+      // attempt, not open a second DB concurrently.
+      expect(instanceCount.count).toBe(1);
+
+      resolveConnect();
+      await staleInit;
+
+      // The stale connection noticed it was stale and discarded itself —
+      // never installed into `this.db`, and torn down.
+      const staleDb = instances[0];
+      expect(staleDb.disconnectAndClear).toHaveBeenCalled();
+      expect(() => adapter.getDb()).toThrow(/initialize/);
+
+      await reinit;
+
+      expect(instanceCount.count).toBe(2);
+      expect(adapter.getDb()).toBe(instances[1]);
     });
 
     it("does not permanently cache a failed connection attempt", async () => {
@@ -299,6 +367,54 @@ describe("PowerSyncStorageAdapter", () => {
       expect(callback).not.toHaveBeenCalled();
     });
 
+    it("re-attaches a still-subscribed listener to the fresh DB after clearAll() + re-initialize()", async () => {
+      // Regression: a listener bound directly to `db1` via `registerListener`
+      // would keep listening to that now-disconnected instance forever
+      // after a same-session sign-out → sign-in swapped in `db2` — the
+      // component never re-subscribes since its effect's dependency
+      // (`adapter`) never changes identity.
+      const adapter = new PowerSyncStorageAdapter(fakeAuth, "https://sync");
+      await adapter.initialize();
+      const callback = jest.fn();
+      adapter.subscribeStatus(callback);
+      callback.mockClear();
+
+      adapter.clearAll();
+      await adapter.initialize();
+
+      const db2 = adapter.getDb() as unknown as MockDb;
+      expect(db2.registerListener).toHaveBeenCalledWith(
+        expect.objectContaining({ statusChanged: expect.any(Function) }),
+      );
+      expect(callback).toHaveBeenCalledWith(db2.currentStatus);
+
+      callback.mockClear();
+      const { statusChanged } = db2.registerListener.mock.calls[0][0];
+      statusChanged({ connected: true });
+      expect(callback).toHaveBeenCalledWith({ connected: true });
+    });
+
+    it("detaches a listener that unsubscribes after a clearAll() + re-initialize() cycle", async () => {
+      const adapter = new PowerSyncStorageAdapter(fakeAuth, "https://sync");
+      await adapter.initialize();
+      const callback = jest.fn();
+      const unsubscribe = adapter.subscribeStatus(callback);
+
+      adapter.clearAll();
+      await adapter.initialize();
+      callback.mockClear();
+      unsubscribe();
+
+      const db2 = adapter.getDb() as unknown as MockDb;
+      // Read fresh (not destructured before `unsubscribe()` ran above) —
+      // the mock's returned unsubscribe clears this same object's
+      // `statusChanged`, mirroring a real listener registry detaching.
+      db2.registerListener.mock.calls[0][0].statusChanged?.({
+        connected: true,
+      });
+      expect(callback).not.toHaveBeenCalled();
+    });
+
     it("returns the DB's currentStatus after initialize()", async () => {
       const adapter = new PowerSyncStorageAdapter(fakeAuth, "https://sync");
       await adapter.initialize();
@@ -328,15 +444,22 @@ describe("PowerSyncStorageAdapter", () => {
   });
 
   describe("clearAll", () => {
-    it("disconnects and clears local data, then resets the adapter", async () => {
+    it("resets the adapter synchronously and disconnects the old DB", async () => {
       const adapter = new PowerSyncStorageAdapter(fakeAuth, "https://sync");
       await adapter.initialize();
       const db = adapter.getDb() as unknown as MockDb;
 
       adapter.clearAll();
 
-      expect(db.disconnectAndClear).toHaveBeenCalled();
+      // getDb()/getStatus() must reflect the sign-out immediately — no
+      // caller should be able to read a connection clearAll() just tore
+      // down. The actual network teardown call is sequenced behind the
+      // scenes (see "waits for a pending clearAll() teardown..."), so it
+      // isn't necessarily synchronous.
       expect(() => adapter.getDb()).toThrow(/initialize/);
+
+      await flushMicrotasks();
+      expect(db.disconnectAndClear).toHaveBeenCalled();
     });
 
     it("is a no-op before initialize()", () => {
