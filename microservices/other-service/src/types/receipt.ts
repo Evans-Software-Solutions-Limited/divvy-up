@@ -1,14 +1,24 @@
-/** A single line item extracted from the receipt image */
+/**
+ * A single line item extracted from the receipt image.
+ *
+ * `confidence` and `flag` map 1:1 onto `packages/db` `receipt_items.confidence`
+ * (real, 0..1, nullable) and `receipt_items.flag` (text, nullable) — see
+ * `packages/db/src/schema.ts`.
+ */
 export type ExtractedItem = {
   description: string;
-  /** Unit price in minor currency units (e.g. cents) */
+  /** Unit price in minor currency units (pence for GBP) */
   unitPrice: number;
   quantity: number;
+  /** Model's per-item read confidence, 0..1 (clamped; omitted if unknown) */
+  confidence?: number;
+  /** Human-readable data-quality note, e.g. "Price hard to read — best guess" */
+  flag?: string;
 };
 
 /**
  * Full structured result returned by the OCR/vision extraction step.
- * All monetary amounts are in minor currency units (e.g. cents for USD).
+ * All monetary amounts are in minor currency units (pence for GBP).
  */
 export type OcrExtractResult = {
   /** Merchant / restaurant name as read from the receipt */
@@ -28,4 +38,10 @@ export type OcrExtractResult = {
   items: ExtractedItem[];
   /** Raw OCR text, forwarded for client-side debugging */
   rawText?: string;
+  /**
+   * Result-level data-quality notes, e.g. "Line items sum to 6100 but
+   * receipt subtotal reads 6200". Never present when empty. These are
+   * informational, not errors — extraction still succeeded.
+   */
+  warnings?: string[];
 };
