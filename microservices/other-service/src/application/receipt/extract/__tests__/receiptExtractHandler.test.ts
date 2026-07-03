@@ -429,4 +429,22 @@ describe("mapAnthropicError (adapter instanceof chain)", () => {
     expect(mapped.code).toBe("upstream_error");
     expect(mapped.status).toBe(502);
   });
+
+  it("maps a plain object with status 429 to upstream_rate_limited (dual-package guard)", () => {
+    // Regression test: if bun ever resolves two copies of @anthropic-ai/sdk,
+    // `instanceof Anthropic.RateLimitError` silently fails even for a real
+    // rate-limit error. The status-code fallback must still classify it
+    // correctly.
+    const err = { status: 429, message: "Too many requests" };
+    const mapped = mapAnthropicError(err);
+    expect(mapped.code).toBe("upstream_rate_limited");
+    expect(mapped.status).toBe(429);
+  });
+
+  it("maps a plain object with status 500 to upstream_error, 502 (dual-package guard)", () => {
+    const err = { status: 500, message: "Internal error" };
+    const mapped = mapAnthropicError(err);
+    expect(mapped.code).toBe("upstream_error");
+    expect(mapped.status).toBe(502);
+  });
 });

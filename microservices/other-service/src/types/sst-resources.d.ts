@@ -4,7 +4,6 @@
 declare module "sst" {
   export interface Resource {
     ReceiptImages: { type: "sst.aws.Bucket"; name: string };
-    AnthropicApiKey: { type: "sst.Secret"; value: string };
   }
 }
 import "sst";

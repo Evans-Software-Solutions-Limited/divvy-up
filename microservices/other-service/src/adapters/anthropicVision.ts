@@ -1,5 +1,5 @@
 import Anthropic from "@anthropic-ai/sdk";
-import { Resource } from "sst";
+import { AnthropicBedrockMantle } from "@anthropic-ai/bedrock-sdk";
 
 import {
   ExtractionRefusedError,
@@ -144,12 +144,14 @@ const EXTRACTION_PROMPT = `You are extracting structured data from a photo of a 
 - Transcribe rawText faithfully as plain text, including the totals section, exactly as printed.
 - Do not invent line items. If you cannot read a line at all, omit it rather than guessing. If you can only partially read a line, include it but lower its confidence and set flag to a short human-readable note (e.g. "Price hard to read — best guess").`;
 
-let client: Anthropic | undefined;
+let client: AnthropicBedrockMantle | undefined;
 
-function getClient(): Anthropic {
+function getClient(): AnthropicBedrockMantle {
   if (!client) {
-    client = new Anthropic({
-      apiKey: Resource.AnthropicApiKey.value,
+    client = new AnthropicBedrockMantle({
+      // Lambda sets AWS_REGION to the deployment region (eu-west-2);
+      // credentials come from the execution role via the default chain.
+      awsRegion: process.env.AWS_REGION,
       timeout: 25_000,
       // The SDK default of 2 retries would blow the API Gateway 30s cap;
       // the mobile client owns retry, not this service.
@@ -164,6 +166,14 @@ function getClient(): Anthropic {
  * Order matters: APIConnectionError is a SUBCLASS of APIError in the
  * TypeScript SDK, so it must be checked before the generic APIError branch
  * or the connection-error case is never reached.
+ *
+ * @anthropic-ai/bedrock-sdk is built on top of @anthropic-ai/sdk and throws
+ * the same error classes, so we keep importing them from the core SDK
+ * (bedrock-sdk does not re-export them itself — checked its package
+ * exports/.d.ts files directly). As a dual-package-instance guard (in case
+ * bun ever resolves two separate copies of @anthropic-ai/sdk, which would
+ * make `instanceof` silently fail), we fall back to classifying by HTTP
+ * status code before giving up with a generic upstream error.
  */
 export function mapAnthropicError(error: unknown): ReceiptExtractError {
   if (error instanceof Anthropic.RateLimitError) {
@@ -175,15 +185,27 @@ export function mapAnthropicError(error: unknown): ReceiptExtractError {
   if (error instanceof Anthropic.APIError) {
     return new UpstreamError(error.message);
   }
+
+  // Dual-package guard: if instanceof missed (two SDK copies), classify by HTTP status.
+  const status = (error as { status?: number } | undefined)?.status;
+  if (status === 429) {
+    return new UpstreamRateLimitedError();
+  }
+  if (typeof status === "number") {
+    return new UpstreamError(
+      error instanceof Error ? error.message : "Unknown upstream error",
+    );
+  }
+
   return new UpstreamError(
     error instanceof Error ? error.message : "Unknown upstream error",
   );
 }
 
 export class AnthropicVisionAdapter {
-  constructor(private readonly injectedClient?: Anthropic) {}
+  constructor(private readonly injectedClient?: AnthropicBedrockMantle) {}
 
-  private get client(): Anthropic {
+  private get client(): AnthropicBedrockMantle {
     return this.injectedClient ?? getClient();
   }
 
@@ -194,7 +216,7 @@ export class AnthropicVisionAdapter {
     let response;
     try {
       response = await this.client.messages.create({
-        model: "claude-opus-4-8",
+        model: "anthropic.claude-opus-4-8",
         max_tokens: 16000,
         thinking: { type: "adaptive" },
         output_config: {
