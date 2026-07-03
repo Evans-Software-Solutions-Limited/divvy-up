@@ -33,12 +33,26 @@ export function useAuth(): AuthState {
   useEffect(() => {
     let bootstrapped = false;
 
+    // `clearAll()` (sign-out / delete-account) tears the PowerSync
+    // connection down for the rest of the process — re-run `initialize()`
+    // whenever a session appears so the *next* sign-in (same app session,
+    // e.g. switching accounts on a shared device) gets a live connection
+    // again instead of every local read/write throwing forever. Safe to
+    // call redundantly alongside `AppProviders`'s boot-time call — both
+    // share the adapter's cached in-flight promise.
+    function reinitStorage() {
+      storage.initialize().catch((err) => {
+        console.error("[useAuth] Storage re-initialize failed:", err);
+      });
+    }
+
     function finishBootstrap(s: AuthSession | null, err?: AuthError) {
       if (bootstrapped) return;
       bootstrapped = true;
       setSession(s);
       if (err) setError(err);
       setIsLoading(false);
+      if (s) reinitStorage();
     }
 
     // Bootstrap: read persisted session. Race against a timeout so a
@@ -71,6 +85,7 @@ export function useAuth(): AuthState {
       } else {
         setSession(s);
         setError(null);
+        if (s) reinitStorage();
       }
     });
 
@@ -78,7 +93,7 @@ export function useAuth(): AuthState {
       unsubscribe();
       clearTimeout(timeout);
     };
-  }, [auth]);
+  }, [auth, storage]);
 
   const signIn = useCallback(
     async (email: string, password: string) => {

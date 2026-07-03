@@ -61,7 +61,6 @@
           }
         }
       ],
-      "expo-sqlite",
       [
         "expo-notifications",
         {

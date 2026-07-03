@@ -1,1 +1,1 @@
-export { SQLiteStorageAdapter } from "./sqlite.adapter";
+export { PowerSyncStorageAdapter } from "./powersync.adapter";

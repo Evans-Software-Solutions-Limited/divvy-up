@@ -1,0 +1,102 @@
+# PowerSync Sync Streams config for Divvy Up.
+#
+# Scopes each device to the authed user's own groups: every stream below
+# joins back through `group_members` to the caller's `auth.user_id()` (the
+# Supabase JWT `sub`), so a user only ever receives rows for groups they
+# belong to. Every such join also requires `active = true` — PowerSync's
+# down-sync bypasses Postgres RLS, so this is the *only* gate stopping a
+# user who has been removed from a group (soft-deleted via
+# `group_members.active`, see packages/db/src/schema.ts) from continuing
+# to receive that group's future updates forever.
+#
+# NOTE on divergence from the original brief: the brief (and PowerSync's
+# *legacy* `bucket_definitions` sync rules) called this file
+# "sync-rules.yaml". As of the current PowerSync docs, Sync Streams
+# (`config.edition: 3` below) are "the recommended path to achieve partial
+# sync for both new and existing projects"
+# (https://docs.powersync.com/sync/overview) — legacy sync rules still
+# work but are no longer the default for new projects, so this uses Sync
+# Streams instead. Legacy bucket-based sync rules remain a fallback if
+# Sync Streams turn out not to fit; PowerSync ships a
+# `powersync migrate sync-rules` CLI command to convert either direction.
+#
+# Upload this file via the PowerSync Cloud dashboard (or `powersync deploy`
+# per the CLI docs) after connecting the instance to the Supabase project —
+# see packages/mobile/POWERSYNC_SETUP.md for the full provisioning steps.
+#
+# Client schema mirror: packages/mobile/src/adapters/powersync/schema.ts
+# Source of truth: packages/db/src/schema.ts
+
+config:
+  edition: 3
+
+streams:
+  # The groups a user belongs to.
+  my_groups:
+    auto_subscribe: true
+    query: |
+      SELECT g.* FROM groups g
+      INNER JOIN group_members gm ON gm.group_id = g.id
+      WHERE gm.user_id = auth.user_id() AND gm.active = true
+
+  # All members (including placeholders) of those groups.
+  my_group_members:
+    auto_subscribe: true
+    query: |
+      SELECT gm.* FROM group_members gm
+      WHERE gm.group_id IN (
+        SELECT group_id FROM group_members WHERE user_id = auth.user_id() AND active = true
+      )
+
+  # Expenses within those groups.
+  my_expenses:
+    auto_subscribe: true
+    query: |
+      SELECT e.* FROM expenses e
+      WHERE e.group_id IN (
+        SELECT group_id FROM group_members WHERE user_id = auth.user_id() AND active = true
+      )
+
+  # Receipt line items on those expenses.
+  my_receipt_items:
+    auto_subscribe: true
+    query: |
+      SELECT ri.* FROM receipt_items ri
+      WHERE ri.expense_id IN (
+        SELECT id FROM expenses WHERE group_id IN (
+          SELECT group_id FROM group_members WHERE user_id = auth.user_id() AND active = true
+        )
+      )
+
+  # Per-member item assignments (one/equal/custom modes).
+  my_item_assignments:
+    auto_subscribe: true
+    query: |
+      SELECT ia.* FROM item_assignments ia
+      WHERE ia.item_id IN (
+        SELECT id FROM receipt_items WHERE expense_id IN (
+          SELECT id FROM expenses WHERE group_id IN (
+            SELECT group_id FROM group_members WHERE user_id = auth.user_id() AND active = true
+          )
+        )
+      )
+
+  # Tax/tip/discount adjustments on those expenses.
+  my_receipt_adjustments:
+    auto_subscribe: true
+    query: |
+      SELECT ra.* FROM receipt_adjustments ra
+      WHERE ra.expense_id IN (
+        SELECT id FROM expenses WHERE group_id IN (
+          SELECT group_id FROM group_members WHERE user_id = auth.user_id() AND active = true
+        )
+      )
+
+  # Settle-up records within those groups.
+  my_settlements:
+    auto_subscribe: true
+    query: |
+      SELECT s.* FROM settlements s
+      WHERE s.group_id IN (
+        SELECT group_id FROM group_members WHERE user_id = auth.user_id() AND active = true
+      )

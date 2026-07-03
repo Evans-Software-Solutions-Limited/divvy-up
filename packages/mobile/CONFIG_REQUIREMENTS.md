@@ -24,12 +24,12 @@ Divvy Up. Sync (PowerSync) and the backend are wired in later phases.
 
 ## Environment Variables (`.env`, see `.env.example`)
 
-| Variable                        | Purpose                     | Status                               |
-| ------------------------------- | --------------------------- | ------------------------------------ |
-| `EXPO_PUBLIC_SUPABASE_URL`      | Supabase project URL (auth) | **provision** (create Supabase proj) |
-| `EXPO_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key (auth)    | **provision**                        |
-| `EXPO_PUBLIC_API_URL`           | SST core API base URL       | from `sst dev` / deployed stage      |
-| `EXPO_PUBLIC_POWERSYNC_URL`     | PowerSync instance URL      | **later** (when sync is wired)       |
+| Variable                        | Purpose                     | Status                                   |
+| ------------------------------- | --------------------------- | ---------------------------------------- |
+| `EXPO_PUBLIC_SUPABASE_URL`      | Supabase project URL (auth) | **provision** (create Supabase proj)     |
+| `EXPO_PUBLIC_SUPABASE_ANON_KEY` | Supabase anon key (auth)    | **provision**                            |
+| `EXPO_PUBLIC_API_URL`           | SST core API base URL       | from `sst dev` / deployed stage          |
+| `EXPO_PUBLIC_POWERSYNC_URL`     | PowerSync instance URL      | **provision** — see `POWERSYNC_SETUP.md` |
 
 ---
 
@@ -53,6 +53,6 @@ Divvy Up. Sync (PowerSync) and the backend are wired in later phases.
 ## Next steps (later phases)
 
 1. `eas init` to create a fresh Expo/EAS project; add `extra.eas.projectId` + `owner` back to `app.json`.
-2. Create the Supabase project; fill the env vars.
-3. Wire **PowerSync** against `packages/db` (Supabase Postgres) for local-first sync.
-4. Port the web screens/flows into native (Home, GroupDetail, ReceiptReview, Balances) — see the port inventory in the project memory.
+2. Create the Supabase project; fill the env vars. Provisioning PowerSync itself is now
+   documented in `POWERSYNC_SETUP.md`.
+3. Port the web screens/flows into native (Home, GroupDetail, ReceiptReview, Balances) — see the port inventory in the project memory.

@@ -24,6 +24,7 @@ rationale and the comparison that ruled out ElectricSQL (read-only writes),
 cr-sqlite (not production-ready), WatermelonDB (DIY sync), etc.
 
 Key facts from that research to respect:
+
 - PowerSync connects **non-invasively** to Supabase Postgres (no schema changes,
   no write perms on your tables); it streams changes down to a local SQLite DB and
   queues local writes back up via an `uploadData` handler using the Supabase client.
@@ -35,12 +36,12 @@ Key facts from that research to respect:
 ## 3. What's already done (do not redo)
 
 - **`packages/db`** (merged, PR #9): the **cloud source-of-truth schema** — Drizzle
-  + `postgres-js` for Supabase, `getDb()` singleton (transaction-mode pooler:
-  `prepare:false`, `max:1`), and a generated migration. Tables: `users`, `groups`,
-  `group_members`, `group_invites`, `expenses`, `receipt_items`, `item_assignments`,
-  `receipt_adjustments`, `settlements`, `activity`. **All money = integer pence;
-  custom split shares = integer `share_weight`.** This is the schema PowerSync syncs
-  FROM — reuse it; don't invent a new one. See `packages/db/src/schema.ts`.
+  - `postgres-js` for Supabase, `getDb()` singleton (transaction-mode pooler:
+    `prepare:false`, `max:1`), and a generated migration. Tables: `users`, `groups`,
+    `group_members`, `group_invites`, `expenses`, `receipt_items`, `item_assignments`,
+    `receipt_adjustments`, `settlements`, `activity`. **All money = integer pence;
+    custom split shares = integer `share_weight`.** This is the schema PowerSync syncs
+    FROM — reuse it; don't invent a new one. See `packages/db/src/schema.ts`.
 - **`packages/mobile`** (merged, PR #10): the **Expo React Native shell** — copied
   from a mature Expo app, stripped to a reusable shell, re-themed to Divvy Up.
   - Expo Router: `app/(auth)/` (sign-in/up/forgot-password) + auth-gated `app/(app)/`
@@ -80,7 +81,7 @@ sync plumbing + a minimal proof it works (e.g. read/write one table locally).
    or re-derive from `@divvy-up/db` types where practical so the two schemas can't
    drift — at minimum add a comment cross-referencing `packages/db/src/schema.ts`.
 3. **Create the PowerSync client + Supabase connector** (a new adapter, e.g.
-   `src/adapters/powersync/`): 
+   `src/adapters/powersync/`):
    - `fetchCredentials()` → PowerSync endpoint + a Supabase session token from the
      existing **`SupabaseAuthAdapter`** (reuse it; don't duplicate auth).
    - `uploadData()` → drain the PowerSync upload queue to Supabase via the supabase-js
@@ -120,6 +121,7 @@ sync plumbing + a minimal proof it works (e.g. read/write one table locally).
 
 Write these as clear steps in the PR description / a short doc. The code should
 compile and unit-test WITHOUT them; they're needed for end-to-end sync:
+
 1. Create a **Supabase project**; run the `packages/db` migration against it
    (`cd packages/db && DATABASE_URL=… bun run db:migrate`); enable logical replication
    / the `powersync` publication as PowerSync's Supabase guide requires.
@@ -135,10 +137,11 @@ compile and unit-test WITHOUT them; they're needed for end-to-end sync:
 Port the **web** screens/flows into native, reading/writing the local PowerSync DB
 instead of HTTP hooks: Home (groups list, balance hero, scan CTA), GroupDetail
 (members, add-member, expenses), ReceiptReview (item editor One/Split/Everyone/Custom
-+ live split bar → SavedScreen), Balances (owed hero, per-debtor rows, SettleUpSheet).
-The web implementations in `packages/web/src/pages/` are the reference; port the
-**pure domain** (`splitPence`, `computeBalances`, pence formatting) into a shared
-package consumed by both. `packages/web` is deleted only after mobile reaches parity.
+
+- live split bar → SavedScreen), Balances (owed hero, per-debtor rows, SettleUpSheet).
+  The web implementations in `packages/web/src/pages/` are the reference; port the
+  **pure domain** (`splitPence`, `computeBalances`, pence formatting) into a shared
+  package consumed by both. `packages/web` is deleted only after mobile reaches parity.
 
 ## 9. Repo facts / commands
 
@@ -146,7 +149,7 @@ package consumed by both. `packages/web` is deleted only after mobile reaches pa
   `microservices/{core,other-service}`.
 - Gates (run from repo root): `bun run typecheck`, `bun run lint`, `bun run prettier:check`
   (fix with `prettier:write`), `bun run test:unit`. Mobile also: `cd packages/mobile &&
-  bun run test:unit` (jest-expo, currently 43 suites / 393 tests, coverage thresholds 0
+bun run test:unit` (jest-expo, currently 43 suites / 393 tests, coverage thresholds 0
   for the shell). `build` for mobile is an EAS echo (no bundler in CI).
 - CI = `.github/workflows/pr-checks.yml` (Detect Changes → Install → Typecheck/Lint/
   Prettier → Build → Unit Tests). Branch from `main`, open a PR, keep it green.
