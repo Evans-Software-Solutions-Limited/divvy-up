@@ -1,4 +1,5 @@
 import { receiptImages } from "./storage";
+import { databaseUrl } from "./secrets";
 
 // Core API: groups, members, expenses, receipt items, assignments, balances
 export const coreAPI = new sst.aws.ApiGatewayV2("api-core");
@@ -8,10 +9,13 @@ export const receiptServiceAPI = new sst.aws.ApiGatewayV2(
   "api-receipt-service",
 );
 
-coreAPI.route("$default", "microservices/core/src/api.handler");
+coreAPI.route("$default", {
+  handler: "microservices/core/src/api.handler",
+  link: [databaseUrl],
+});
 receiptServiceAPI.route("$default", {
   handler: "microservices/other-service/src/api.handler",
-  link: [receiptImages],
+  link: [receiptImages, databaseUrl],
   permissions: [
     {
       // Claude in Amazon Bedrock ("Mantle" Messages-API endpoint) —

@@ -3,6 +3,7 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     globals: true,
+    setupFiles: ["./vitest.setup.ts"],
     coverage: {
       provider: "v8",
       include: ["src/application/**/*.ts", "src/**/repositories/*.ts"],
@@ -13,6 +14,7 @@ export default defineConfig({
         "**/sst-env.d.ts",
         "src/api.ts",
         "src/index.ts",
+        "**/__tests__/**",
       ],
       // Target 90% - increase as tests are added. Set to 0 for template to pass CI.
       thresholds: {

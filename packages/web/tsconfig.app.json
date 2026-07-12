@@ -5,7 +5,10 @@
     "useDefineForClassFields": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "module": "ESNext",
-    "types": ["vite/client", "vitest/globals"],
+    // "node" is required because src/lib/eden.ts type-imports CoreApi from
+    // @divvy-up/core, whose source graph now reaches @divvy-up/db's client.ts
+    // (Node `require`/`process`). Type-only; erased from the browser bundle.
+    "types": ["vite/client", "vitest/globals", "node"],
     "skipLibCheck": true,
 
     /* Bundler mode */

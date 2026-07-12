@@ -28,19 +28,29 @@ limits**. Its feature set:
 
 ## Where Divvy Up stands (audited)
 
-Only two things are genuinely working end-to-end today: **balance
-computation + the Balances screen**, and the **largest-remainder pence-exact
-split engine** (implemented identically in web and backend). Everything else
-is one of: backend-on-in-memory-Maps, schema-only, or UI-prototype-only.
+Working end-to-end today: **balance computation + the Balances screen**, the
+**largest-remainder pence-exact split engine** (implemented identically in web
+and backend), and — as of MVP Phase 1 (branch `feat/core-persistence`) —
+**durable persistence for the wired core flows** (groups, members, expenses,
+items, balances reads). Everything else is one of: schema-only or
+UI-prototype-only.
 
-One structural fact dominates the whole table below: **`microservices/core`
-persists to in-memory `Map`s, not Postgres** — the Drizzle schema in
-`packages/db` is complete and well-designed but nothing reads or writes it.
-Until that lands, every "working" feature resets on Lambda cold start.
+> **Update (Phase 1 — `feat/core-persistence`):** the structural blocker below
+> is resolved for the wired flows. `microservices/core`'s `GroupsRepository`
+> and `ExpensesRepository` now read/write **Postgres via Drizzle** (`packages/db`),
+> replacing the in-memory `Map`s, inside transactions, verified by a PGlite
+> suite running the real committed migration. The `DivvyUpDatabaseUrl` secret is
+> linked to both Lambdas. **Still pending:** a live-stage smoke against a
+> provisioned Divvy Up Supabase project (no such project exists in the org yet),
+> and `userId` ownership scoping (arrives with auth, Phase 2).
+
+Historical context (pre-Phase 1): `microservices/core` persisted to in-memory
+`Map`s, not Postgres — the Drizzle schema in `packages/db` was complete but
+nothing read or wrote it, so every "working" feature reset on Lambda cold start.
 
 | Tricount feature                               | Divvy Up status                                                                                                                                                  | Gap size                                   |
 | ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| Group create/list/view + add member            | Backend (in-memory) + UI wired                                                                                                                                   | Persistence only                           |
+| Group create/list/view + add member            | **Backend on Postgres (Drizzle) + UI wired** as of Phase 1; live-stage smoke + per-user scoping pending                                                          | Auth scoping (Phase 2)                     |
 | Join via share link, no account                | **Absent** (full `group_invites` schema exists; no handler, no UI; no auth at all — JWT authorizer is a TODO)                                                    | **Large — this is Tricount's core UX**     |
 | **Manual expense entry (no receipt)**          | **No UI; API almost there** — `POST /expenses` exists but requires an `items` array; `expenses.receipt_image_key` is already nullable by design                  | **Small** (see below)                      |
 | Flexible splits                                | one/equal/everyone modes work through API+UI; custom weights have API+schema but **no UI editor**                                                                | Small                                      |
@@ -91,8 +101,10 @@ are one level deeper:
 ## Recommended MVP order (each ≈ one phase)
 
 1. **Core persistence** — wire `microservices/core` to `packages/db`
-   Postgres. Everything else is sandcastles until this lands. (Known debt,
-   explicitly deferred so far.)
+   Postgres. ✅ **Done in branch `feat/core-persistence`** (Groups + Expenses
+   repositories on Drizzle, transactional, PGlite-tested against the real
+   migration). Remaining tail: live-stage smoke once a Divvy Up Supabase
+   project is provisioned, then `userId` scoping folds in with Phase 2 auth.
 2. **Auth + invite links** — Supabase JWT authorizer (TODO in
    `infra/api.ts`) + `group_invites` handlers/UI. Restores the security
    assumptions PR #13 deferred (per-user object authorization on
