@@ -87,9 +87,20 @@ export async function getAuthUser(
       audience: "authenticated",
     });
 
+    const { sub, email } = payload;
+    if (typeof sub !== "string" || typeof email !== "string" || email === "") {
+      // A cryptographically-valid token can still lack a usable `email` claim —
+      // Supabase anonymous and phone-only sign-ins do. Those can't be provisioned
+      // (`users.email` is NOT NULL) and are out of scope for V1's email + social
+      // auth, so reject as unauthorised (401) rather than letting provisioning
+      // 500 on every request from that principal.
+      console.debug("[auth] verified token missing sub/email claim");
+      return null;
+    }
+
     return {
-      sub: payload.sub as string,
-      email: payload.email as string,
+      sub,
+      email,
       email_verified: Boolean(payload.email_verified),
       iat: payload.iat as number,
       exp: payload.exp as number,

@@ -59,6 +59,26 @@ describe("provisionUser", () => {
     expect(rows).toHaveLength(1);
   });
 
+  it("provisions two distinct users that share an email (deleted-and-recreated account, new sub)", async () => {
+    // `id` (== Supabase sub) is the identity; email is descriptive and NOT
+    // unique. A user who deletes their Supabase account and signs up again gets
+    // a fresh sub but may reuse the same email — provisioning the new sub must
+    // not collide with the stale row. (Regression: users.email was once unique,
+    // which 500-locked-out this case.)
+    const email = "recycled@example.com";
+    const oldSub = crypto.randomUUID();
+    const newSub = crypto.randomUUID();
+
+    const first = await provisionUser(claimsFor(oldSub, email), db);
+    const second = await provisionUser(claimsFor(newSub, email), db);
+
+    expect(first).toEqual({ userId: oldSub });
+    expect(second).toEqual({ userId: newSub });
+
+    const rows = await db.select().from(users).where(eq(users.email, email));
+    expect(rows).toHaveLength(2);
+  });
+
   it("is safe under concurrent first calls for the same sub — exactly one row", async () => {
     const sub = crypto.randomUUID();
     const claims = claimsFor(sub);

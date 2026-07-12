@@ -136,6 +136,24 @@ describe("supabaseAuth", () => {
       );
     });
 
+    it("returns null when a verified token carries no email claim (e.g. anonymous/phone sign-in)", async () => {
+      const { getAuthUser } = await freshModule();
+      // aud/iss/signature all valid, but no `email` — this must reject as 401,
+      // not pass through to provisioning (which would 500 on a NOT NULL email).
+      jwtVerifyMock.mockResolvedValue({
+        payload: {
+          sub: "22222222-2222-2222-2222-222222222222",
+          email_verified: false,
+          iat: 1_700_000_000,
+          exp: 1_700_003_600,
+        },
+      });
+
+      const result = await getAuthUser("Bearer no-email.token.value");
+
+      expect(result).toBeNull();
+    });
+
     it("memoises the JWKS: createRemoteJWKSet is called once across multiple getAuthUser calls", async () => {
       const { getAuthUser } = await freshModule();
       jwtVerifyMock.mockResolvedValue({ payload: VALID_PAYLOAD });
