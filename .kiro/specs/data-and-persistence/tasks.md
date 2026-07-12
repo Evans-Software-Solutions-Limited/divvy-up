@@ -5,9 +5,18 @@
 > client + secret → schema + enums → migration → repositories (one per entity) → type
 > reconciliation → repository tests**. Every task references the requirements it satisfies.
 
+> **Status (branch `feat/core-persistence`, MVP Phase 1):** the schema/migration/client scaffold
+> already existed; this phase wired the two **existing** repositories (`GroupsRepository`,
+> `ExpensesRepository`) to Drizzle/Postgres with a PGlite-backed test suite, and linked the
+> `DivvyUpDatabaseUrl` secret. Scope was deliberately held to **zero behaviour change at the API
+> surface** (existing handler tests pass unmodified). Tasks that would churn the current
+> handler/type contract are deferred to their owning phases and marked below: type reconciliation
+> (9), standalone Members/Settlements/Activity repositories (11 partial, 13) and `userId` DI
+> scoping (14) land with `authentication` (#4) and `groups-and-members` (#5).
+
 ---
 
-- [ ] **1. Scaffold the `@divvy-up/db` package**
+- [x] **1. Scaffold the `@divvy-up/db` package**
   - Create `packages/db/` with `package.json` (`name: @divvy-up/db`, `type: module`,
     `exports` for `.`, `./schema`, `./client`), `tsconfig.json`, and `src/index.ts`
     re-exporting schema, `createDb`, `getDb`, `Db`.
@@ -15,14 +24,14 @@
     `typescript`. Confirm it joins the Bun/Turbo workspace and `typecheck` runs.
   - _Requirements: 1.1_
 
-- [ ] **2. Implement the singleton `getDb()` client**
+- [x] **2. Implement the singleton `getDb()` client**
   - Add `src/client.ts`: `createDb(url?)` over `postgres-js` with `prepare:false`, `max:1`;
     `getDatabaseUrl()` reading SST `Resource.DivvyUpDatabaseUrl.value` then falling back to
     `process.env.DATABASE_URL`, throwing a descriptive error if neither resolves; module-level
     `_db` memoised `getDb()`; export `type Db`.
   - _Requirements: 1.2, 1.3, 1.4, 1.5, 1.6, 1.7_
 
-- [ ] **3. Declare the connection-string secret and link it to the functions**
+- [x] **3. Declare the connection-string secret and link it to the functions**
   - Create `infra/secrets.ts` exporting `databaseUrl = new sst.Secret("DivvyUpDatabaseUrl")`
     with a comment documenting the Supabase transaction-pooler URL (`:6543`), set per stage
     via `sst secret set`, never committed.
@@ -30,7 +39,7 @@
     routes; import the secret in `sst.config.ts` run() if needed.
   - _Requirements: 2.1, 2.2, 2.3, 2.4_
 
-- [ ] **4. Define enums and the `users` + `groups` tables**
+- [x] **4. Define enums and the `users` + `groups` tables**
   - Add `src/schema.ts` with `expenseStatus`, `assignmentMode`, `adjustmentKind`,
     `activityKind` pgEnums.
   - Define `users` (uuid PK = Supabase auth id, unique email, **nullable** display name,
@@ -38,14 +47,14 @@
     FK → users, timestamps, creator index).
   - _Requirements: 4.1, 4.2, 4.10_
 
-- [ ] **5. Define `group_members` with placeholder + colour + soft-delete + partial-unique account link**
+- [x] **5. Define `group_members` with placeholder + colour + soft-delete + partial-unique account link**
   - Columns: `group_id` FK (cascade), nullable `user_id` FK (set null), `name`,
     `colour_index`, `placeholder` boolean default false, `active` boolean default true, timestamps.
   - Add the `0..7` colour CHECK, a `group_id` index, and the **partial** unique index over
     `(group_id, user_id) WHERE user_id IS NOT NULL`.
   - _Requirements: 4.3, 5.\* (colour_index integer), 6.1, 6.2_
 
-- [ ] **6. Define `expenses` and `receipt_items`**
+- [x] **6. Define `expenses` and `receipt_items`**
   - `expenses`: `group_id` FK (cascade), `payer_member_id` FK → group_members (restrict),
     description, date, `status` enum default `draft`, `receipt_image_key`, `merchant`,
     `currency` default `GBP`, `created_by`, timestamps, group index.
@@ -56,7 +65,7 @@
     expense index.
   - _Requirements: 4.4, 4.5, 5.1, 5.3, 5.4_
 
-- [ ] **7. Define `group_invites`, `item_assignments`, `receipt_adjustments`, `settlements`, `activity`**
+- [x] **7. Define `group_invites`, `item_assignments`, `receipt_adjustments`, `settlements`, `activity`**
   - `group_invites`: `group_id` FK (cascade), nullable `member_id` FK → group_members (set null),
     `token_hash` (text, **unique index** — store a hash, not the raw token), `created_by`,
     `expires_at`, nullable `used_at`, timestamp; group index.
@@ -73,7 +82,7 @@
   - Add Drizzle `relations()` and `$inferSelect`/`$inferInsert` type exports for all tables.
   - _Requirements: 4.6, 4.7, 4.8, 4.9, 4.11, 5.1, 5.2, 5.5, 5.6, 6.3, 6.4, 6.5_
 
-- [ ] **8. Add Drizzle CLI config + scripts and generate the initial migration**
+- [x] **8. Add Drizzle CLI config + scripts and generate the initial migration**
   - Add `drizzle.config.ts` (schema path, `out: ./migrations`, postgresql dialect,
     `DATABASE_URL` creds, strict).
   - Add `db:generate`/`db:migrate`/`db:push`/`db:studio` scripts to `packages/db/package.json`.
@@ -82,7 +91,7 @@
     CHECKs, indexes).
   - _Requirements: 3.1, 3.2, 3.3, 3.4, 3.5_
 
-- [ ] **9. Reconcile `domain/types.ts` to the schema**
+- [ ] **9. Reconcile `domain/types.ts` to the schema** _(DEFERRED — would rename `CustomShare.fraction`→`weight` and flip currency default, churning the frozen handler/test contract; the Drizzle repos already store integer `share_weight` + GBP correctly. Lands with #4/#5.)_
   - `CustomShare.fraction: number` → `weight: number` (integer); default `currency` USD → GBP;
     extend `Member` with `colourIndex` (0..7), `placeholder`, `active`, `userId?`; extend `Group`
     with `emoji`, `coverIndex`; extend `ReceiptItem` with `confidence?`, `flag?`, `groupLabel?`.
@@ -90,7 +99,7 @@
     field definitions. Update any compile errors this surfaces in services/handlers.
   - _Requirements: 9.1, 9.2, 9.3, 9.4, 9.5, 9.6_
 
-- [ ] **10. Rewrite `GroupsRepository` against Drizzle with ownership scoping**
+- [x] **10. Rewrite `GroupsRepository` against Drizzle** _(persistence done; `userId` ownership scoping deferred to auth #4 — no authenticated subject exists yet)_
   - Replace the in-memory stub: constructor takes optional `Db` (default `getDb()`), preserve
     `static readonly key`. Implement `list(userId)` (join through `group_members`),
     `create(userId, input)` (insert group + creator's `group_members` row in one transaction,
@@ -98,14 +107,14 @@
     hydrating members.
   - _Requirements: 7.1, 7.2, 7.3, 7.4, 7.5, 8.1_
 
-- [ ] **11. Add `MembersRepository`**
+- [~] **11. Add `MembersRepository`** _(PARTIAL — member add/list served by `GroupsRepository.addMember`/hydration, matching today's handlers; standalone repo with `linkUser`/`remove`/`findMembership` lands with `groups-and-members` #5)_
   - `listByGroup`, `addMember` (placeholder or linked account; assign next free
     `colour_index`), `linkUser` (attach account to a placeholder, flip `placeholder` false),
     `remove` — all scoped by `userId` (caller must be a member of the group). Respect the
     membership unique constraint.
   - _Requirements: 7.1, 7.3, 7.4, 8.2_
 
-- [ ] **12. Rewrite `ExpensesRepository` against Drizzle (transactional)**
+- [x] **12. Rewrite `ExpensesRepository` against Drizzle (transactional)** _(create/updateItemAssignment atomic; `userId` scoping deferred to auth #4)_
   - `create(userId, input)`: one transaction inserting expense + items + assignments +
     adjustments, `status` default `draft`; assert `payer_member_id` and all assignment
     `member_id`s belong to the expense's group. `findById(userId, id)` hydrates items,
@@ -114,21 +123,21 @@ groupId)`. `updateItemAssignment(...)` replaces the item's assignment rows atomi
     `finalize(...)` flips status, scoped. Preserve `static readonly key` and method names.
   - _Requirements: 6.4, 7.1, 7.3, 7.4, 8.3, 8.4, 8.5, 8.8_
 
-- [ ] **13. Add `SettlementsRepository` and `ActivityRepository`**
+- [ ] **13. Add `SettlementsRepository` and `ActivityRepository`** _(DEFERRED — no handlers consume these yet; land with `balances-and-settle-up` / activity slice)_
   - `SettlementsRepository.record` (mark-as-paid only, no money movement; `from <> to`) and
     `listByGroup`, scoped by `userId`.
   - `ActivityRepository.append` and `listByGroup` (most-recent-first, `limit`), scoped by
     `userId`.
   - _Requirements: 7.1, 7.3, 7.4, 8.6, 8.7_
 
-- [ ] **14. Wire repositories into the Elysia DI and update services/handlers**
+- [ ] **14. Wire repositories into the Elysia DI and thread `userId`** _(DEFERRED — DI already injects the two repos; `userId` threading is auth #4)_
   - Update the `.decorate(...)` service modules so each repository (incl. the new
     members/settlements/activity ones) is injected; thread `userId` through services/handlers
     (sourced from the request context — a stub/`x-user-id` until feature #4's authorizer
     lands). Keep handlers thin.
   - _Requirements: 7.1, 8.8_
 
-- [ ] **15. Repository tests against a sandbox DB**
+- [x] **15. Repository tests against a sandbox DB** _(PGlite in-process Postgres running the real committed migration; DB-backed by default, no external service)_
   - Add a Vitest global setup that, when a test `DATABASE_URL` is present, applies the
     migration and exposes `createDb(testUrl)`; truncate all tables in `beforeEach`; `skip`
     DB-backed blocks with a clear message when no `DATABASE_URL`.

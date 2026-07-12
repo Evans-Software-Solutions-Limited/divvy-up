@@ -11,8 +11,8 @@ function getDatabaseUrl(): string {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { Resource } = require("sst");
-    if (Resource.DatabaseUrl?.value) {
-      return Resource.DatabaseUrl.value;
+    if (Resource.DivvyUpDatabaseUrl?.value) {
+      return Resource.DivvyUpDatabaseUrl.value;
     }
   } catch {
     // Resource not available (local / tests) — fall through to env var.
@@ -22,7 +22,7 @@ function getDatabaseUrl(): string {
   if (!url) {
     throw new Error(
       "DATABASE_URL is not set. For local dev run `supabase start` and export its " +
-        "connection string, or set the SST secret: `sst secret set DatabaseUrl <url>`.",
+        "connection string, or set the SST secret: `sst secret set DivvyUpDatabaseUrl <url>`.",
     );
   }
   return url;
