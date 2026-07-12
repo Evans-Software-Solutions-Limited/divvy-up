@@ -4,6 +4,11 @@
 // ("group-1", "member-1") and can never run against real FK/uuid columns.
 // Repository correctness against the real schema is covered separately by the
 // PGlite-backed *.pg.test.ts suites.
+//
+// Ownership scoping (data-and-persistence Requirement 7) is modelled here too:
+// each `Member` carries the `userId` of the account it's linked to (undefined
+// for a placeholder), and every read/write is scoped to active memberships —
+// mirroring the real `GroupsRepository`'s `group_members` join.
 import type { GroupsRepository } from "../../groupsRepository";
 import type { Group, Member } from "../../../../domain/types";
 
@@ -12,26 +17,46 @@ export class InMemoryGroupsRepository {
 
   private readonly store = new Map<string, Group>();
 
-  async list(): Promise<Group[]> {
-    return [...this.store.values()];
+  private isMember(userId: string, groupId: string): boolean {
+    return (
+      this.store.get(groupId)?.members.some((m) => m.userId === userId) ?? false
+    );
   }
 
-  async create(name: string): Promise<Group> {
-    const group: Group = {
+  async list(userId: string): Promise<Group[]> {
+    return [...this.store.values()].filter((g) => this.isMember(userId, g.id));
+  }
+
+  /** Mirrors the real repo: creating a group also adds the creator as a member. */
+  async create(userId: string, name: string): Promise<Group> {
+    const groupId = crypto.randomUUID();
+    const creator: Member = {
       id: crypto.randomUUID(),
+      groupId,
+      name: "Creator",
+      userId,
+    };
+    const group: Group = {
+      id: groupId,
       name,
       createdAt: new Date().toISOString(),
-      members: [],
+      members: [creator],
     };
-    this.store.set(group.id, group);
+    this.store.set(groupId, group);
     return group;
   }
 
-  async findById(id: string): Promise<Group | null> {
+  async findById(userId: string, id: string): Promise<Group | null> {
+    if (!this.isMember(userId, id)) return null;
     return this.store.get(id) ?? null;
   }
 
-  async addMember(groupId: string, name: string): Promise<Member | null> {
+  async addMember(
+    userId: string,
+    groupId: string,
+    name: string,
+  ): Promise<Member | null> {
+    if (!this.isMember(userId, groupId)) return null;
     const group = this.store.get(groupId);
     if (!group) return null;
     const member: Member = {

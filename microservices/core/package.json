@@ -13,6 +13,7 @@
     "build": "tsc --noEmit"
   },
   "dependencies": {
+    "@divvy-up/api-utils": "workspace:*",
     "@divvy-up/db": "workspace:*",
     "@elysiajs/openapi": "^1.4.14",
     "drizzle-orm": "^0.44.2",

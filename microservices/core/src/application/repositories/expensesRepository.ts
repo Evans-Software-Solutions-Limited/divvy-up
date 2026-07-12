@@ -3,7 +3,6 @@ import {
   expenses,
   getDb,
   groupMembers,
-  groups,
   itemAssignments,
   receiptAdjustments,
   receiptItems,
@@ -19,7 +18,7 @@ import type {
   ReceiptAdjustment,
   ReceiptItem,
 } from "../../domain/types";
-import { DEV_USER_ID, ensureDevUser } from "./devUser";
+import { isActiveMember } from "./membership";
 import { isUuid } from "./isUuid";
 
 type CreateExpenseInput = Omit<
@@ -266,15 +265,11 @@ export class ExpensesRepository {
     return toExpense(expenseRow, items, adjustments);
   }
 
-  async create(input: CreateExpenseInput): Promise<Expense> {
+  /** Throws unless `userId` is an active member of `input.groupId` (Req 7.3/7.4) —
+   * never distinguishes "group doesn't exist" from "caller isn't a member". */
+  async create(userId: string, input: CreateExpenseInput): Promise<Expense> {
     return this.db.transaction(async (tx) => {
-      await ensureDevUser(tx);
-
-      const [group] = await tx
-        .select({ id: groups.id })
-        .from(groups)
-        .where(eq(groups.id, input.groupId));
-      if (!group) {
+      if (!(await isActiveMember(tx, userId, input.groupId))) {
         throw new Error(`Group not found: ${input.groupId}`);
       }
 
@@ -319,7 +314,7 @@ export class ExpensesRepository {
           merchant: input.merchant ?? null,
           currency: input.currency,
           receiptImageKey: input.receiptImageKey ?? null,
-          createdBy: DEV_USER_ID,
+          createdBy: userId,
         })
         .returning();
 
@@ -365,13 +360,19 @@ export class ExpensesRepository {
     });
   }
 
-  async findById(id: string): Promise<Expense | null> {
+  /** Returns null unless `userId` is a member of the expense's group (Req 7.3/7.4). */
+  async findById(userId: string, id: string): Promise<Expense | null> {
     if (!isUuid(id)) return null;
-    return this.hydrateExpense(this.db, id);
+    const expense = await this.hydrateExpense(this.db, id);
+    if (!expense) return null;
+    if (!(await isActiveMember(this.db, userId, expense.groupId))) return null;
+    return expense;
   }
 
-  async listByGroup(groupId: string): Promise<Expense[]> {
+  /** Returns [] unless `userId` is a member of `groupId` (Req 7.3/7.4). */
+  async listByGroup(userId: string, groupId: string): Promise<Expense[]> {
     if (!isUuid(groupId)) return [];
+    if (!(await isActiveMember(this.db, userId, groupId))) return [];
 
     const expenseRows = await this.db
       .select()
@@ -417,7 +418,9 @@ export class ExpensesRepository {
     });
   }
 
+  /** Returns null unless `userId` is a member of the expense's group (Req 7.3/7.4). */
   async updateItemAssignment(
+    userId: string,
     expenseId: string,
     itemId: string,
     assignment: ItemAssignment,
@@ -432,6 +435,7 @@ export class ExpensesRepository {
         .from(expenses)
         .where(eq(expenses.id, expenseId));
       if (!expenseRow) return null;
+      if (!(await isActiveMember(tx, userId, expenseRow.groupId))) return null;
 
       const [itemRow] = await tx
         .select()
@@ -492,10 +496,18 @@ export class ExpensesRepository {
     });
   }
 
-  async finalize(expenseId: string): Promise<Expense | null> {
+  /** Returns null unless `userId` is a member of the expense's group (Req 7.3/7.4). */
+  async finalize(userId: string, expenseId: string): Promise<Expense | null> {
     if (!isUuid(expenseId)) return null;
 
     return this.db.transaction(async (tx) => {
+      const [expenseRow] = await tx
+        .select({ groupId: expenses.groupId })
+        .from(expenses)
+        .where(eq(expenses.id, expenseId));
+      if (!expenseRow) return null;
+      if (!(await isActiveMember(tx, userId, expenseRow.groupId))) return null;
+
       const [row] = await tx
         .update(expenses)
         .set({ status: "finalized", updatedAt: new Date() })

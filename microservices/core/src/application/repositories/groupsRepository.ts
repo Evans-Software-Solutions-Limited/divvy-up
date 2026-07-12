@@ -3,12 +3,13 @@ import {
   getDb,
   groupMembers,
   groups,
+  users,
   type Db,
   type GroupMemberRow,
   type GroupRow,
 } from "@divvy-up/db";
 import type { Group, Member } from "../../domain/types";
-import { DEV_USER_ID, ensureDevUser } from "./devUser";
+import { isActiveMember } from "./membership";
 import { isUuid } from "./isUuid";
 
 function toMember(row: GroupMemberRow): Member {
@@ -54,15 +55,23 @@ export class GroupsRepository {
     return this._db;
   }
 
-  // TODO(auth, phase 2): scope to the caller's memberships
-  async list(): Promise<Group[]> {
+  async list(userId: string): Promise<Group[]> {
+    const memberships = await this.db
+      .select({ groupId: groupMembers.groupId })
+      .from(groupMembers)
+      .where(
+        and(eq(groupMembers.userId, userId), eq(groupMembers.active, true)),
+      );
+    if (memberships.length === 0) return [];
+    const groupIds = memberships.map((m) => m.groupId);
+
     const groupRows = await this.db
       .select()
       .from(groups)
+      .where(inArray(groups.id, groupIds))
       .orderBy(asc(groups.createdAt));
     if (groupRows.length === 0) return [];
 
-    const groupIds = groupRows.map((g) => g.id);
     const memberRows = await this.db
       .select()
       .from(groupMembers)
@@ -86,21 +95,45 @@ export class GroupsRepository {
     );
   }
 
-  async create(name: string): Promise<Group> {
+  /**
+   * Creates the group AND the creator's own `group_members` row in one
+   * transaction (Requirement 7.5) — the response now includes the creator as
+   * a member, an intended change vs Phase 1 (which left `members: []`).
+   */
+  async create(userId: string, name: string): Promise<Group> {
     return this.db.transaction(async (tx) => {
-      await ensureDevUser(tx);
-      // Do NOT auto-insert a creator member row here — that changes the API
-      // response shape; the creator's own membership arrives with auth in Phase 2.
       const [row] = await tx
         .insert(groups)
-        .values({ name, createdBy: DEV_USER_ID })
+        .values({ name, createdBy: userId })
         .returning();
-      return toGroup(row, []);
+
+      const [creator] = await tx
+        .select({ displayName: users.displayName, email: users.email })
+        .from(users)
+        .where(eq(users.id, userId));
+      const creatorName =
+        creator?.displayName || creator?.email.split("@")[0] || "Member";
+
+      const [memberRow] = await tx
+        .insert(groupMembers)
+        .values({
+          groupId: row.id,
+          userId,
+          name: creatorName,
+          colourIndex: 0,
+          placeholder: false,
+          active: true,
+        })
+        .returning();
+
+      return toGroup(row, [toMember(memberRow)]);
     });
   }
 
-  async findById(id: string): Promise<Group | null> {
+  /** Returns null unless `userId` is an active member of the group (Req 7.3/7.4). */
+  async findById(userId: string, id: string): Promise<Group | null> {
     if (!isUuid(id)) return null;
+    if (!(await isActiveMember(this.db, userId, id))) return null;
 
     const [row] = await this.db.select().from(groups).where(eq(groups.id, id));
     if (!row) return null;
@@ -114,14 +147,14 @@ export class GroupsRepository {
     return toGroup(row, memberRows.map(toMember));
   }
 
-  async addMember(groupId: string, name: string): Promise<Member | null> {
+  /** Returns null unless `userId` is an active member of `groupId` (Req 7.3/7.4). */
+  async addMember(
+    userId: string,
+    groupId: string,
+    name: string,
+  ): Promise<Member | null> {
     if (!isUuid(groupId)) return null;
-
-    const [group] = await this.db
-      .select({ id: groups.id })
-      .from(groups)
-      .where(eq(groups.id, groupId));
-    if (!group) return null;
+    if (!(await isActiveMember(this.db, userId, groupId))) return null;
 
     const activeMembers = await this.db
       .select({ colourIndex: groupMembers.colourIndex })

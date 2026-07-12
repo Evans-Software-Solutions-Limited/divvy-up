@@ -1,5 +1,6 @@
 import Elysia, { t } from "elysia";
 import { GroupsRepositoryService } from "./groupsListService";
+import { coreAuth, getUserId } from "../../../shared/auth";
 
 const GroupSchema = t.Object({
   id: t.String(),
@@ -8,15 +9,19 @@ const GroupSchema = t.Object({
   members: t.Array(t.Any()),
 });
 
-export const groupsListHandler = new Elysia().use(GroupsRepositoryService).get(
-  "/groups",
-  async (ctx) => {
-    const groups = await ctx.GroupsRepository.list();
-    return groups;
-  },
-  {
-    response: {
-      200: t.Array(GroupSchema),
+export const groupsListHandler = new Elysia()
+  .use(GroupsRepositoryService)
+  .use(coreAuth)
+  .get(
+    "/groups",
+    async (ctx) => {
+      const userId = getUserId(ctx);
+      const groups = await ctx.GroupsRepository.list(userId);
+      return groups;
     },
-  },
-);
+    {
+      response: {
+        200: t.Array(GroupSchema),
+      },
+    },
+  );

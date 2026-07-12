@@ -1,5 +1,5 @@
 import { receiptImages } from "./storage";
-import { databaseUrl } from "./secrets";
+import { databaseUrl, supabaseUrl } from "./secrets";
 
 // Core API: groups, members, expenses, receipt items, assignments, balances
 export const coreAPI = new sst.aws.ApiGatewayV2("api-core");
@@ -11,11 +11,11 @@ export const receiptServiceAPI = new sst.aws.ApiGatewayV2(
 
 coreAPI.route("$default", {
   handler: "microservices/core/src/api.handler",
-  link: [databaseUrl],
+  link: [databaseUrl, supabaseUrl],
 });
 receiptServiceAPI.route("$default", {
   handler: "microservices/other-service/src/api.handler",
-  link: [receiptImages, databaseUrl],
+  link: [receiptImages, databaseUrl, supabaseUrl],
   permissions: [
     {
       // Claude in Amazon Bedrock ("Mantle" Messages-API endpoint) —
@@ -27,5 +27,3 @@ receiptServiceAPI.route("$default", {
   ],
   timeout: "29 seconds", // API Gateway v2 hard-caps integrations at 30s
 });
-
-// TODO: add JWT authorizer once auth is wired up

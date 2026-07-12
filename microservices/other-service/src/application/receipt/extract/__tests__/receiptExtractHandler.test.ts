@@ -1,3 +1,4 @@
+import { authHeaders } from "../../../__tests__/support/authMock";
 import Elysia from "elysia";
 import Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it } from "vitest";
@@ -132,7 +133,7 @@ function postExtract(
   return app.handle(
     new Request("http://localhost/receipts/extract", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(body),
     }),
   );
