@@ -45,7 +45,12 @@ export const activityKind = pgEnum("activity_kind", [
 
 export const users = pgTable("users", {
   id: uuid("id").primaryKey(), // == Supabase auth.users.id (the JWT `sub`)
-  email: text("email").notNull().unique(),
+  // NOT unique: `id` (== Supabase `sub`) is the identity; email is descriptive.
+  // Supabase already enforces email uniqueness among LIVE accounts, so a unique
+  // constraint here only creates a lockout — if an account is deleted and the
+  // same email re-signs up, Supabase issues a fresh `sub`, and provisioning that
+  // new user must not collide with the stale row's email.
+  email: text("email").notNull(),
   // nullable: base JWT claims carry no name; provisioning derives from email / user_metadata
   displayName: text("display_name"),
   createdAt: timestamp("created_at", { withTimezone: true })

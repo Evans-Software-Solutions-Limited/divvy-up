@@ -1,6 +1,7 @@
 import Elysia, { t } from "elysia";
 import { ReceiptExtractRepositoryService } from "./receiptExtractService";
 import { ReceiptExtractError } from "../../../types/errors";
+import { receiptAuth } from "../../../shared/auth";
 
 const ExtractedItemSchema = t.Object({
   description: t.String(),
@@ -36,6 +37,7 @@ const ErrorResponseSchema = t.Object({
 
 export const receiptExtractHandler = new Elysia()
   .use(ReceiptExtractRepositoryService)
+  .use(receiptAuth)
   .post(
     "/receipts/extract",
     async (ctx) => {

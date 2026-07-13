@@ -2,19 +2,25 @@ import Elysia, { t } from "elysia";
 import { GroupsBalancesService } from "./groupsBalancesService";
 import { computeBalances } from "../../expenses/finalize/computeBalances";
 import type { Balance } from "../../../domain/types";
+import { coreAuth, getUserId } from "../../../shared/auth";
 
 export const groupsBalancesHandler = new Elysia()
   .use(GroupsBalancesService)
+  .use(coreAuth)
   .get(
     "/groups/:id/balances",
     async (ctx) => {
-      const group = await ctx.GroupsRepository.findById(ctx.params.id);
+      const userId = getUserId(ctx);
+      const group = await ctx.GroupsRepository.findById(userId, ctx.params.id);
       if (!group) {
         ctx.set.status = 404;
         return { error: "Group not found" };
       }
 
-      const expenses = await ctx.ExpensesRepository.listByGroup(ctx.params.id);
+      const expenses = await ctx.ExpensesRepository.listByGroup(
+        userId,
+        ctx.params.id,
+      );
       const finalized = expenses.filter((e) => e.status === "finalized");
       const memberIds = group.members.map((m) => m.id);
 

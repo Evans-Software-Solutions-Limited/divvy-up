@@ -1,3 +1,4 @@
+import { authHeaders } from "../../../__tests__/support/authMock";
 import Elysia from "elysia";
 import { describe, expect, it } from "vitest";
 
@@ -45,7 +46,7 @@ function postUploadUrl(
   return app.handle(
     new Request("http://localhost/receipts/upload-url", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: { "Content-Type": "application/json", ...authHeaders() },
       body: JSON.stringify(body),
     }),
   );

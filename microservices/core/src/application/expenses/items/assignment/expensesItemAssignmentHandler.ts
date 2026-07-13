@@ -1,5 +1,6 @@
 import Elysia, { t } from "elysia";
 import { ExpensesItemAssignmentService } from "./expensesItemAssignmentService";
+import { coreAuth, getUserId } from "../../../../shared/auth";
 
 /**
  * Discriminated union schema for all supported assignment modes.
@@ -17,10 +18,13 @@ const AssignmentSchema = t.Union([
 
 export const expensesItemAssignmentHandler = new Elysia()
   .use(ExpensesItemAssignmentService)
+  .use(coreAuth)
   .put(
     "/expenses/:id/items/:itemId/assignment",
     async (ctx) => {
+      const userId = getUserId(ctx);
       const expense = await ctx.ExpensesRepository.updateItemAssignment(
+        userId,
         ctx.params.id,
         ctx.params.itemId,
         ctx.body.assignment,

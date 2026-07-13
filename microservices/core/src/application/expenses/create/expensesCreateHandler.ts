@@ -1,5 +1,6 @@
 import Elysia, { t } from "elysia";
 import { ExpensesRepositoryService } from "./expensesCreateService";
+import { coreAuth, getUserId } from "../../../shared/auth";
 
 const ReceiptItemInputSchema = t.Object({
   description: t.String(),
@@ -30,10 +31,12 @@ const CreateExpenseBodySchema = t.Object({
 
 export const expensesCreateHandler = new Elysia()
   .use(ExpensesRepositoryService)
+  .use(coreAuth)
   .post(
     "/expenses",
     async (ctx) => {
-      const expense = await ctx.ExpensesRepository.create(ctx.body);
+      const userId = getUserId(ctx);
+      const expense = await ctx.ExpensesRepository.create(userId, ctx.body);
       return expense;
     },
     {

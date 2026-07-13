@@ -1,15 +1,24 @@
+import { authHeaders, TEST_USER_ID } from "../../../__tests__/support/authMock";
 import { beforeEach, describe, expect, it } from "vitest";
 import { expensesFinalizeHandler } from "../expensesFinalizeHandler";
-import { expensesRepo } from "../../create/expensesCreateService";
+import { expensesRepo as expensesRepoUntyped } from "../../create/expensesCreateService";
 import type { Balance, Expense } from "../../../../domain/types";
+// The vitest.setup.ts module mock swaps the real repo for this in-memory
+// double at runtime; typed here so `_addMember` (test-only, not on the real
+// class) is visible.
+import type { InMemoryExpensesRepository } from "../../../repositories/__tests__/support/inMemoryExpensesRepository";
+
+const expensesRepo =
+  expensesRepoUntyped as unknown as InMemoryExpensesRepository;
 
 beforeEach(() => {
   expensesRepo._clearStore();
+  expensesRepo._addMember("group-1", TEST_USER_ID);
 });
 
 describe("POST /expenses/:id/finalize", () => {
   it("marks the expense as finalized", async () => {
-    const expense = await expensesRepo.create({
+    const expense = await expensesRepo.create(TEST_USER_ID, {
       groupId: "group-1",
       payerId: "member-1",
       description: "Lunch",
@@ -28,7 +37,7 @@ describe("POST /expenses/:id/finalize", () => {
     const response = await expensesFinalizeHandler.handle(
       new Request(`http://localhost/expenses/${expense.id}/finalize`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({}),
       }),
     );
@@ -42,7 +51,7 @@ describe("POST /expenses/:id/finalize", () => {
   });
 
   it("computes balances for 'one' assignment", async () => {
-    const expense = await expensesRepo.create({
+    const expense = await expensesRepo.create(TEST_USER_ID, {
       groupId: "group-1",
       payerId: "member-1",
       description: "Coffee",
@@ -61,7 +70,7 @@ describe("POST /expenses/:id/finalize", () => {
     const response = await expensesFinalizeHandler.handle(
       new Request(`http://localhost/expenses/${expense.id}/finalize`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({}),
       }),
     );
@@ -79,7 +88,7 @@ describe("POST /expenses/:id/finalize", () => {
   });
 
   it("computes balances for 'equal' split", async () => {
-    const expense = await expensesRepo.create({
+    const expense = await expensesRepo.create(TEST_USER_ID, {
       groupId: "group-1",
       payerId: "member-1",
       description: "Pizza",
@@ -101,7 +110,7 @@ describe("POST /expenses/:id/finalize", () => {
     const response = await expensesFinalizeHandler.handle(
       new Request(`http://localhost/expenses/${expense.id}/finalize`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({}),
       }),
     );
@@ -116,7 +125,7 @@ describe("POST /expenses/:id/finalize", () => {
   });
 
   it("resolves 'everyone' assignments when memberIds provided", async () => {
-    const expense = await expensesRepo.create({
+    const expense = await expensesRepo.create(TEST_USER_ID, {
       groupId: "group-1",
       payerId: "member-1",
       description: "Shared snacks",
@@ -135,7 +144,7 @@ describe("POST /expenses/:id/finalize", () => {
     const response = await expensesFinalizeHandler.handle(
       new Request(`http://localhost/expenses/${expense.id}/finalize`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({
           memberIds: ["member-1", "member-2", "member-3", "member-4"],
         }),
@@ -155,7 +164,38 @@ describe("POST /expenses/:id/finalize", () => {
     const response = await expensesFinalizeHandler.handle(
       new Request("http://localhost/expenses/unknown-id/finalize", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
+        body: JSON.stringify({}),
+      }),
+    );
+
+    expect(response.status).toBe(404);
+  });
+
+  it("returns 404 when the caller is not a member of the expense's group", async () => {
+    const expense = await expensesRepo.create(TEST_USER_ID, {
+      groupId: "group-1",
+      payerId: "member-1",
+      description: "Lunch",
+      date: "2026-03-26",
+      currency: "USD",
+      items: [
+        {
+          description: "Burger",
+          unitPrice: 1500,
+          quantity: 1,
+          assignment: { type: "everyone" },
+        },
+      ],
+    });
+
+    const response = await expensesFinalizeHandler.handle(
+      new Request(`http://localhost/expenses/${expense.id}/finalize`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...authHeaders("test-2"),
+        },
         body: JSON.stringify({}),
       }),
     );

@@ -7,6 +7,7 @@ import {
   type Db,
   type GroupMemberRow,
   type GroupRow,
+  type UserRow,
 } from "@divvy-up/db";
 import type { Expense } from "../../../domain/types";
 import {
@@ -36,18 +37,23 @@ beforeEach(async () => {
 
 type CreateInput = Parameters<
   InstanceType<typeof ExpensesRepository>["create"]
->[0];
+>[1];
 
 async function seedGroupWithMembers(
   names: string[],
-): Promise<{ group: GroupRow; members: GroupMemberRow[] }> {
+): Promise<{ group: GroupRow; members: GroupMemberRow[]; user: UserRow }> {
   const user = await seedUser(db);
   const group = await seedGroup(db, user.id);
+  // Link the creator as an active member (colour slot 7, clear of the
+  // `names` slots below) so `user.id` is a valid caller for every ownership
+  // check exercised here — mirrors GroupsRepository.create()'s
+  // creator-membership invariant without exercising that repo in this suite.
+  await seedMember(db, group.id, "Caller", 7, { userId: user.id });
   const members: GroupMemberRow[] = [];
   for (let i = 0; i < names.length; i++) {
     members.push(await seedMember(db, group.id, names[i], i));
   }
-  return { group, members };
+  return { group, members, user };
 }
 
 function baseInput(
@@ -80,10 +86,13 @@ async function countRows(): Promise<{
 
 describe("ExpensesRepository (PGlite)", () => {
   it("create() round-trips pence exactly and preserves item order", async () => {
-    const { group, members } = await seedGroupWithMembers(["Payer", "Diner"]);
+    const { group, members, user } = await seedGroupWithMembers([
+      "Payer",
+      "Diner",
+    ]);
     const repo = new ExpensesRepository(db);
 
-    const expense: Expense = await repo.create({
+    const expense: Expense = await repo.create(user.id, {
       ...baseInput(group.id, members[0].id, [
         {
           description: "Starter",
@@ -116,16 +125,21 @@ describe("ExpensesRepository (PGlite)", () => {
     ]);
 
     // Round-trip through findById() too, not just the create() echo.
-    const found = await repo.findById(expense.id);
+    const found = await repo.findById(user.id, expense.id);
     expect(found?.items.map((i) => i.unitPrice)).toEqual([1299, 2350]);
     expect(found?.adjustments).toEqual(expense.adjustments);
   });
 
   it("round-trips all four assignment modes", async () => {
-    const { group, members } = await seedGroupWithMembers(["A", "B", "C"]);
+    const { group, members, user } = await seedGroupWithMembers([
+      "A",
+      "B",
+      "C",
+    ]);
     const repo = new ExpensesRepository(db);
 
     const expense = await repo.create(
+      user.id,
       baseInput(group.id, members[0].id, [
         {
           description: "One",
@@ -191,7 +205,7 @@ describe("ExpensesRepository (PGlite)", () => {
     // findById() re-hydrates from the DB, where assignment rows come back in a
     // stable-but-id-ordered sequence (not tied to input order), so compare the
     // custom shares order-independently by member.
-    const found = await repo.findById(expense.id);
+    const found = await repo.findById(user.id, expense.id);
     const foundCustom = found?.items[3].assignment;
     expect(foundCustom?.type).toBe("custom");
     const weightByMember = Object.fromEntries(
@@ -205,12 +219,39 @@ describe("ExpensesRepository (PGlite)", () => {
     });
   });
 
-  it("create() throws and persists zero rows when the payer is not an active member", async () => {
+  it("create() throws and persists zero rows when the caller isn't a member of the group", async () => {
     const { group } = await seedGroupWithMembers(["A"]);
+    const outsider = await seedUser(db);
     const repo = new ExpensesRepository(db);
 
     await expect(
       repo.create(
+        outsider.id,
+        baseInput(group.id, "00000000-0000-0000-0000-000000000099", [
+          {
+            description: "Item",
+            unitPrice: 100,
+            quantity: 1,
+            assignment: { type: "everyone" },
+          },
+        ]),
+      ),
+    ).rejects.toThrow();
+
+    expect(await countRows()).toEqual({
+      expenses: 0,
+      items: 0,
+      assignments: 0,
+    });
+  });
+
+  it("create() throws and persists zero rows when the payer is not an active member", async () => {
+    const { group, user } = await seedGroupWithMembers(["A"]);
+    const repo = new ExpensesRepository(db);
+
+    await expect(
+      repo.create(
+        user.id,
         baseInput(group.id, "00000000-0000-0000-0000-000000000099", [
           {
             description: "Item",
@@ -230,14 +271,17 @@ describe("ExpensesRepository (PGlite)", () => {
   });
 
   it("create() throws when an assignment memberId belongs to a different group", async () => {
-    const { group: groupA, members: membersA } = await seedGroupWithMembers([
-      "A",
-    ]);
+    const {
+      group: groupA,
+      members: membersA,
+      user,
+    } = await seedGroupWithMembers(["A"]);
     const { members: membersB } = await seedGroupWithMembers(["X"]);
     const repo = new ExpensesRepository(db);
 
     await expect(
       repo.create(
+        user.id,
         baseInput(groupA.id, membersA[0].id, [
           {
             description: "Item",
@@ -257,11 +301,12 @@ describe("ExpensesRepository (PGlite)", () => {
   });
 
   it("create() throws and rolls back on a duplicate memberId in an equal split", async () => {
-    const { group, members } = await seedGroupWithMembers(["A", "B"]);
+    const { group, members, user } = await seedGroupWithMembers(["A", "B"]);
     const repo = new ExpensesRepository(db);
 
     await expect(
       repo.create(
+        user.id,
         baseInput(group.id, members[0].id, [
           {
             description: "Item",
@@ -284,10 +329,11 @@ describe("ExpensesRepository (PGlite)", () => {
   });
 
   it("updateItemAssignment() replaces rows atomically (custom → everyone leaves zero rows)", async () => {
-    const { group, members } = await seedGroupWithMembers(["A", "B"]);
+    const { group, members, user } = await seedGroupWithMembers(["A", "B"]);
     const repo = new ExpensesRepository(db);
 
     const expense = await repo.create(
+      user.id,
       baseInput(group.id, members[0].id, [
         {
           description: "Item",
@@ -305,9 +351,12 @@ describe("ExpensesRepository (PGlite)", () => {
     );
     const itemId = expense.items[0].id;
 
-    const updated = await repo.updateItemAssignment(expense.id, itemId, {
-      type: "everyone",
-    });
+    const updated = await repo.updateItemAssignment(
+      user.id,
+      expense.id,
+      itemId,
+      { type: "everyone" },
+    );
 
     expect(updated?.items[0].assignment).toEqual({ type: "everyone" });
     const rows = await db
@@ -318,10 +367,11 @@ describe("ExpensesRepository (PGlite)", () => {
   });
 
   it("updateItemAssignment() returns null for a wrong expense/item pairing", async () => {
-    const { group, members } = await seedGroupWithMembers(["A"]);
+    const { group, members, user } = await seedGroupWithMembers(["A"]);
     const repo = new ExpensesRepository(db);
 
     const expenseOne = await repo.create(
+      user.id,
       baseInput(group.id, members[0].id, [
         {
           description: "One",
@@ -332,6 +382,7 @@ describe("ExpensesRepository (PGlite)", () => {
       ]),
     );
     const expenseTwo = await repo.create(
+      user.id,
       baseInput(group.id, members[0].id, [
         {
           description: "Two",
@@ -343,6 +394,7 @@ describe("ExpensesRepository (PGlite)", () => {
     );
 
     const result = await repo.updateItemAssignment(
+      user.id,
       expenseOne.id,
       expenseTwo.items[0].id,
       { type: "one", memberId: members[0].id },
@@ -351,10 +403,11 @@ describe("ExpensesRepository (PGlite)", () => {
   });
 
   it("finalize() flips draft to finalized, is idempotent, and null for unknown", async () => {
-    const { group, members } = await seedGroupWithMembers(["A"]);
+    const { group, members, user } = await seedGroupWithMembers(["A"]);
     const repo = new ExpensesRepository(db);
 
     const expense = await repo.create(
+      user.id,
       baseInput(group.id, members[0].id, [
         {
           description: "Item",
@@ -366,26 +419,34 @@ describe("ExpensesRepository (PGlite)", () => {
     );
     expect(expense.status).toBe("draft");
 
-    const finalized = await repo.finalize(expense.id);
+    const finalized = await repo.finalize(user.id, expense.id);
     expect(finalized?.status).toBe("finalized");
 
-    const finalizedAgain = await repo.finalize(expense.id);
+    const finalizedAgain = await repo.finalize(user.id, expense.id);
     expect(finalizedAgain?.status).toBe("finalized");
 
-    const unknown = await repo.finalize("00000000-0000-0000-0000-000000000099");
+    const unknown = await repo.finalize(
+      user.id,
+      "00000000-0000-0000-0000-000000000099",
+    );
     expect(unknown).toBeNull();
   });
 
   it("listByGroup() returns only that group's expenses in createdAt order", async () => {
-    const { group: groupA, members: membersA } = await seedGroupWithMembers([
-      "A",
-    ]);
-    const { group: groupB, members: membersB } = await seedGroupWithMembers([
-      "B",
-    ]);
+    const {
+      group: groupA,
+      members: membersA,
+      user: userA,
+    } = await seedGroupWithMembers(["A"]);
+    const {
+      group: groupB,
+      members: membersB,
+      user: userB,
+    } = await seedGroupWithMembers(["B"]);
     const repo = new ExpensesRepository(db);
 
     const first = await repo.create(
+      userA.id,
       baseInput(groupA.id, membersA[0].id, [
         {
           description: "First",
@@ -397,6 +458,7 @@ describe("ExpensesRepository (PGlite)", () => {
     );
     await new Promise((r) => setTimeout(r, 5));
     const second = await repo.create(
+      userA.id,
       baseInput(groupA.id, membersA[0].id, [
         {
           description: "Second",
@@ -407,6 +469,7 @@ describe("ExpensesRepository (PGlite)", () => {
       ]),
     );
     await repo.create(
+      userB.id,
       baseInput(groupB.id, membersB[0].id, [
         {
           description: "Other group",
@@ -417,19 +480,50 @@ describe("ExpensesRepository (PGlite)", () => {
       ]),
     );
 
-    const result = await repo.listByGroup(groupA.id);
+    const result = await repo.listByGroup(userA.id, groupA.id);
     expect(result.map((e) => e.id)).toEqual([first.id, second.id]);
   });
 
-  it("returns null/[] for non-UUID ids everywhere", async () => {
+  it("returns null/[] and blocks writes for a userId who isn't a member of the group (scoping, Req 7.3/7.4)", async () => {
+    const { group, members, user } = await seedGroupWithMembers(["A"]);
+    const outsider = await seedUser(db);
     const repo = new ExpensesRepository(db);
-    expect(await repo.findById("not-a-uuid")).toBeNull();
-    expect(await repo.listByGroup("not-a-uuid")).toEqual([]);
+
+    const expense = await repo.create(
+      user.id,
+      baseInput(group.id, members[0].id, [
+        {
+          description: "Item",
+          unitPrice: 100,
+          quantity: 1,
+          assignment: { type: "everyone" },
+        },
+      ]),
+    );
+
+    expect(await repo.findById(outsider.id, expense.id)).toBeNull();
+    expect(await repo.listByGroup(outsider.id, group.id)).toEqual([]);
     expect(
-      await repo.updateItemAssignment("not-a-uuid", "not-a-uuid", {
+      await repo.updateItemAssignment(
+        outsider.id,
+        expense.id,
+        expense.items[0].id,
+        { type: "everyone" },
+      ),
+    ).toBeNull();
+    expect(await repo.finalize(outsider.id, expense.id)).toBeNull();
+  });
+
+  it("returns null/[] for non-UUID ids everywhere", async () => {
+    const user = await seedUser(db);
+    const repo = new ExpensesRepository(db);
+    expect(await repo.findById(user.id, "not-a-uuid")).toBeNull();
+    expect(await repo.listByGroup(user.id, "not-a-uuid")).toEqual([]);
+    expect(
+      await repo.updateItemAssignment(user.id, "not-a-uuid", "not-a-uuid", {
         type: "everyone",
       }),
     ).toBeNull();
-    expect(await repo.finalize("not-a-uuid")).toBeNull();
+    expect(await repo.finalize(user.id, "not-a-uuid")).toBeNull();
   });
 });

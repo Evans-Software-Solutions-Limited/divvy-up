@@ -1,13 +1,19 @@
 import Elysia, { t } from "elysia";
 import { ExpensesFinalizeService } from "./expensesFinalizeService";
 import { computeBalances } from "./computeBalances";
+import { coreAuth, getUserId } from "../../../shared/auth";
 
 export const expensesFinalizeHandler = new Elysia()
   .use(ExpensesFinalizeService)
+  .use(coreAuth)
   .post(
     "/expenses/:id/finalize",
     async (ctx) => {
-      const expense = await ctx.ExpensesRepository.finalize(ctx.params.id);
+      const userId = getUserId(ctx);
+      const expense = await ctx.ExpensesRepository.finalize(
+        userId,
+        ctx.params.id,
+      );
       if (!expense) {
         ctx.set.status = 404;
         return { error: "Expense not found" };
