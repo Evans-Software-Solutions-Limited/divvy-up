@@ -1,7 +1,8 @@
 import { authHeaders } from "../../../__tests__/support/authMock";
 import Elysia from "elysia";
 import Anthropic from "@anthropic-ai/sdk";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { isGroupMember } from "@divvy-up/api-utils/auth";
 
 import { receiptExtractHandler } from "../receiptExtractHandler";
 import { ReceiptExtractRepository } from "../../../repositories/receiptExtractRepository";
@@ -46,6 +47,9 @@ type ErrorResponseBody = { code: string; message: string };
 
 /** A key shaped exactly as /receipts/upload-url generates them. */
 const VALID_KEY = "receipts/9c858901-8a57-4791-81fe-4c455b099bc9.jpg";
+
+/** A UUID-shaped group id (the body schema requires the uuid pattern). */
+const VALID_GROUP_ID = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
 
 /** A valid raw extraction the fake vision adapter can return as-is or mutate per test. */
 function validRawExtraction(
@@ -149,7 +153,7 @@ describe("POST /receipts/extract", () => {
 
     const response = await postExtract(app, {
       imageKey: VALID_KEY,
-      groupId: "group-1",
+      groupId: VALID_GROUP_ID,
     });
 
     expect(response.status).toBe(200);
@@ -161,7 +165,7 @@ describe("POST /receipts/extract", () => {
     expect(data.tax).toBe(108);
     expect(data.tip).toBe(0);
     expect(data.total).toBe(1458);
-    expect(data.groupId).toBe("group-1");
+    expect(data.groupId).toBe(VALID_GROUP_ID);
     expect(data.items).toHaveLength(2);
     expect(data.items[0]).toMatchObject({
       description: "Flat White",
@@ -169,6 +173,57 @@ describe("POST /receipts/extract", () => {
       quantity: 1,
     });
     expect(data.warnings).toBeUndefined();
+  });
+
+  it("returns 404 when the caller is not an active member of the passed groupId", async () => {
+    vi.mocked(isGroupMember).mockResolvedValueOnce(false);
+    const repository = new ReceiptExtractRepository(
+      fakeS3(),
+      fakeVision(validRawExtraction()),
+    );
+    const app = appWithRepository(repository);
+
+    const response = await postExtract(app, {
+      imageKey: VALID_KEY,
+      groupId: "99999999-9999-4999-8999-999999999999",
+    });
+
+    expect(response.status).toBe(404);
+    const data = (await response.json()) as ErrorResponseBody;
+    expect(data.code).toBe("not_found");
+  });
+
+  it("does not run a membership check when no groupId is supplied", async () => {
+    vi.mocked(isGroupMember).mockClear();
+    const repository = new ReceiptExtractRepository(
+      fakeS3(),
+      fakeVision(validRawExtraction()),
+    );
+    const app = appWithRepository(repository);
+
+    const response = await postExtract(app, { imageKey: VALID_KEY });
+
+    expect(response.status).toBe(200);
+    expect(vi.mocked(isGroupMember)).not.toHaveBeenCalled();
+  });
+
+  it("rejects a non-UUID groupId with 422 before any membership/DB work", async () => {
+    vi.mocked(isGroupMember).mockClear();
+    const repository = new ReceiptExtractRepository(
+      fakeS3(),
+      fakeVision(validRawExtraction()),
+    );
+    const app = appWithRepository(repository);
+
+    // Body validation must reject a malformed groupId at the edge, so it never
+    // reaches isGroupMember (which would otherwise hit a Postgres uuid cast).
+    const response = await postExtract(app, {
+      imageKey: VALID_KEY,
+      groupId: "not-a-uuid",
+    });
+
+    expect(response.status).toBe(422);
+    expect(vi.mocked(isGroupMember)).not.toHaveBeenCalled();
   });
 
   it("populates warnings when line items don't reconcile with subtotal", async () => {
