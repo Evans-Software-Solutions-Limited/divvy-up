@@ -1,5 +1,7 @@
 import Elysia, { t } from "elysia";
+import { getUser } from "@divvy-up/api-utils/auth";
 import { ReceiptUploadService } from "./receiptUploadService";
+import { ReceiptUploadsService } from "../../repositories/receiptUploadsService";
 import { ReceiptExtractError } from "../../../types/errors";
 import { receiptAuth } from "../../../shared/auth";
 
@@ -19,12 +21,14 @@ const ErrorResponseSchema = t.Object({
 
 export const receiptUploadHandler = new Elysia()
   .use(ReceiptUploadService)
+  .use(ReceiptUploadsService)
   .use(receiptAuth)
   .post(
     "/receipts/upload-url",
     async (ctx) => {
+      let result;
       try {
-        return await ctx.ReceiptImages.createUploadUrl(ctx.body.contentType);
+        result = await ctx.ReceiptImages.createUploadUrl(ctx.body.contentType);
       } catch (error) {
         if (error instanceof ReceiptExtractError) {
           ctx.set.status = error.status;
@@ -36,6 +40,15 @@ export const receiptUploadHandler = new Elysia()
           message: error instanceof Error ? error.message : "Unknown error",
         };
       }
+
+      // Bind the issued key to its uploader BEFORE returning it — a caller
+      // must never receive a key with no ownership record. Deliberately
+      // outside the try/catch above: a thrown error here is NOT one of the
+      // typed upload failures, so it should surface as an uncaught 500 via
+      // the global error handler, not be folded into 502 upstream_error.
+      await ctx.ReceiptUploadsRepository.record(getUser(ctx).sub, result.key);
+
+      return result;
     },
     {
       body: t.Object({

@@ -1,9 +1,11 @@
-import { authHeaders } from "../../../__tests__/support/authMock";
+import { authHeaders, TEST_USER_ID } from "../../../__tests__/support/authMock";
+import { fakeReceiptUploadsRepository } from "../../../__tests__/support/fakeReceiptUploadsRepository";
 import Elysia from "elysia";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { receiptUploadHandler } from "../receiptUploadHandler";
 import { ReceiptUploadService } from "../receiptUploadService";
+import { ReceiptUploadsRepository } from "../../../repositories/receiptUploadsRepository";
 import type {
   S3ReceiptImagesAdapter,
   UploadUrlResult,
@@ -34,8 +36,16 @@ function fakeS3(
   } as unknown as S3ReceiptImagesAdapter;
 }
 
-function appWithAdapter(adapter: S3ReceiptImagesAdapter) {
-  const service = new Elysia().decorate("ReceiptImages", adapter);
+/** `uploadsRepository` defaults to a no-op fake so pre-existing tests that
+ * don't care about the ownership binding stay green; pass a fake with a
+ * `record` spy to assert it was called with the right (userId, key). */
+function appWithAdapter(
+  adapter: S3ReceiptImagesAdapter,
+  uploadsRepository: ReceiptUploadsRepository = fakeReceiptUploadsRepository(),
+) {
+  const service = new Elysia()
+    .decorate("ReceiptImages", adapter)
+    .decorate(ReceiptUploadsRepository.key, uploadsRepository);
   return new Elysia().use(service).use(receiptUploadHandler as never);
 }
 
@@ -110,6 +120,44 @@ describe("POST /receipts/upload-url", () => {
     expect(response.status).toBe(502);
     const data = (await response.json()) as ErrorResponseBody;
     expect(data.code).toBe("upstream_error");
+  });
+
+  it("records the (authenticated user, issued key) binding before returning", async () => {
+    const record = vi.fn(async () => {});
+    const app = appWithAdapter(
+      fakeS3({
+        key: "receipts/9c858901-8a57-4791-81fe-4c455b099bc9.jpg",
+        uploadUrl: "https://s3.example.com/presigned",
+        expiresIn: 300,
+      }),
+      fakeReceiptUploadsRepository({ record }),
+    );
+
+    const response = await postUploadUrl(app, { contentType: "image/jpeg" });
+
+    expect(response.status).toBe(200);
+    expect(record).toHaveBeenCalledWith(
+      TEST_USER_ID,
+      "receipts/9c858901-8a57-4791-81fe-4c455b099bc9.jpg",
+    );
+  });
+
+  it("never issues a key when recording the ownership binding throws (surfaces as 500, not a 2xx)", async () => {
+    const record = vi.fn(async () => {
+      throw new Error("db unavailable");
+    });
+    const app = appWithAdapter(
+      fakeS3({
+        key: "receipts/9c858901-8a57-4791-81fe-4c455b099bc9.jpg",
+        uploadUrl: "https://s3.example.com/presigned",
+        expiresIn: 300,
+      }),
+      fakeReceiptUploadsRepository({ record }),
+    );
+
+    const response = await postUploadUrl(app, { contentType: "image/jpeg" });
+
+    expect(response.status).toBeGreaterThanOrEqual(500);
   });
 });
 
