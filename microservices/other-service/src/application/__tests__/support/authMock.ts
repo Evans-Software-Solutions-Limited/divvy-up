@@ -23,6 +23,15 @@ const VERIFIED_USER: SupabaseUser = {
   exp: 0,
 };
 
+// Hoisted so it can be referenced inside the hoisted `vi.mock` factory (vitest
+// forbids *exporting* a hoisted binding, so it stays module-private). Defaults
+// to "is a member" so the membership check is transparent to tests that don't
+// care; a test flips it per-case via `vi.mocked(isGroupMember)` on the mocked
+// module (see receiptExtractHandler.test.ts).
+const { isGroupMemberMock } = vi.hoisted(() => ({
+  isGroupMemberMock: vi.fn(async () => true),
+}));
+
 vi.mock("@divvy-up/api-utils/auth", async () => {
   const actual = await vi.importActual<
     typeof import("@divvy-up/api-utils/auth")
@@ -36,6 +45,9 @@ vi.mock("@divvy-up/api-utils/auth", async () => {
     provisionUser: vi.fn(async (claims: SupabaseUser) => ({
       userId: claims.sub,
     })),
+    // Mocked so tests never hit `getDb()`. `getUser`/`requireAuth`/`isActiveMember`
+    // stay real (from `...actual`).
+    isGroupMember: isGroupMemberMock,
   };
 });
 
