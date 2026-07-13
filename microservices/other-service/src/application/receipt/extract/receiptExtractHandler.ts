@@ -1,4 +1,5 @@
 import Elysia, { t } from "elysia";
+import { getUser, isGroupMember } from "@divvy-up/api-utils/auth";
 import { ReceiptExtractRepositoryService } from "./receiptExtractService";
 import { ReceiptExtractError } from "../../../types/errors";
 import { receiptAuth } from "../../../shared/auth";
@@ -41,6 +42,22 @@ export const receiptExtractHandler = new Elysia()
   .post(
     "/receipts/extract",
     async (ctx) => {
+      // Object-level authorization: if the caller names a group, they must be an
+      // active member of it — otherwise 404 (not-found ≡ not-authorised, no
+      // existence leak). `requireAuth` (via receiptAuth) has already guaranteed a
+      // verified user. NOTE: this scopes the *group association* only; binding the
+      // `imageKey` itself to its uploader (so a caller can't extract another
+      // user's receipt image) is tracked as a separate follow-up for the
+      // receipts-multitenancy / scan-flow phase.
+      const { groupId } = ctx.body;
+      if (groupId) {
+        const { sub: userId } = getUser(ctx);
+        if (!(await isGroupMember(userId, groupId))) {
+          ctx.set.status = 404;
+          return { code: "not_found", message: "Group not found" };
+        }
+      }
+
       try {
         return await ctx.ReceiptExtractRepository.extract(
           ctx.body.imageKey,

@@ -1,7 +1,8 @@
 import { authHeaders } from "../../../__tests__/support/authMock";
 import Elysia from "elysia";
 import Anthropic from "@anthropic-ai/sdk";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { isGroupMember } from "@divvy-up/api-utils/auth";
 
 import { receiptExtractHandler } from "../receiptExtractHandler";
 import { ReceiptExtractRepository } from "../../../repositories/receiptExtractRepository";
@@ -169,6 +170,38 @@ describe("POST /receipts/extract", () => {
       quantity: 1,
     });
     expect(data.warnings).toBeUndefined();
+  });
+
+  it("returns 404 when the caller is not an active member of the passed groupId", async () => {
+    vi.mocked(isGroupMember).mockResolvedValueOnce(false);
+    const repository = new ReceiptExtractRepository(
+      fakeS3(),
+      fakeVision(validRawExtraction()),
+    );
+    const app = appWithRepository(repository);
+
+    const response = await postExtract(app, {
+      imageKey: VALID_KEY,
+      groupId: "99999999-9999-4999-8999-999999999999",
+    });
+
+    expect(response.status).toBe(404);
+    const data = (await response.json()) as ErrorResponseBody;
+    expect(data.code).toBe("not_found");
+  });
+
+  it("does not run a membership check when no groupId is supplied", async () => {
+    vi.mocked(isGroupMember).mockClear();
+    const repository = new ReceiptExtractRepository(
+      fakeS3(),
+      fakeVision(validRawExtraction()),
+    );
+    const app = appWithRepository(repository);
+
+    const response = await postExtract(app, { imageKey: VALID_KEY });
+
+    expect(response.status).toBe(200);
+    expect(vi.mocked(isGroupMember)).not.toHaveBeenCalled();
   });
 
   it("populates warnings when line items don't reconcile with subtotal", async () => {
