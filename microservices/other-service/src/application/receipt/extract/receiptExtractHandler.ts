@@ -93,9 +93,16 @@ export const receiptExtractHandler = new Elysia()
         }),
         /**
          * Group this receipt belongs to. Returned in the response so the
-         * caller can immediately POST /expenses with the extracted data.
+         * caller can immediately POST /expenses with the extracted data. UUID
+         * pattern (like `imageKey` above) so a malformed value is a clean 422 at
+         * the edge, not a Postgres uuid-cast 500 when the membership check runs.
          */
-        groupId: t.Optional(t.String()),
+        groupId: t.Optional(
+          t.String({
+            pattern:
+              "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          }),
+        ),
       }),
       response: {
         200: OcrExtractResultSchema,
