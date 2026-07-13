@@ -340,6 +340,22 @@ export const activity = pgTable(
   }),
 );
 
+// ─── receipt_uploads ── (binds an S3 imageKey to its uploader; object-level authz) ──
+//
+// Written at upload-url issue time (`createUploadUrl`) so `/receipts/extract`
+// can verify the caller owns the key before reading it — a valid-shaped key
+// alone must not be sufficient to read another user's receipt image.
+
+export const receiptUploads = pgTable("receipt_uploads", {
+  imageKey: text("image_key").primaryKey(), // == the S3 key issued by createUploadUrl
+  uploadedBy: uuid("uploaded_by")
+    .notNull()
+    .references(() => users.id),
+  createdAt: timestamp("created_at", { withTimezone: true })
+    .notNull()
+    .defaultNow(),
+});
+
 // ─── Schema-inferred types (source of truth for row shapes) ───────────────────
 
 export type UserRow = typeof users.$inferSelect;
@@ -362,3 +378,5 @@ export type SettlementRow = typeof settlements.$inferSelect;
 export type NewSettlementRow = typeof settlements.$inferInsert;
 export type ActivityRow = typeof activity.$inferSelect;
 export type NewActivityRow = typeof activity.$inferInsert;
+export type ReceiptUploadRow = typeof receiptUploads.$inferSelect;
+export type NewReceiptUploadRow = typeof receiptUploads.$inferInsert;

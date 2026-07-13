@@ -1,6 +1,7 @@
 import Elysia, { t } from "elysia";
 import { getUser, isGroupMember } from "@divvy-up/api-utils/auth";
 import { ReceiptExtractRepositoryService } from "./receiptExtractService";
+import { ReceiptUploadsService } from "../../repositories/receiptUploadsService";
 import { ReceiptExtractError } from "../../../types/errors";
 import { receiptAuth } from "../../../shared/auth";
 
@@ -38,20 +39,31 @@ const ErrorResponseSchema = t.Object({
 
 export const receiptExtractHandler = new Elysia()
   .use(ReceiptExtractRepositoryService)
+  .use(ReceiptUploadsService)
   .use(receiptAuth)
   .post(
     "/receipts/extract",
     async (ctx) => {
-      // Object-level authorization: if the caller names a group, they must be an
-      // active member of it — otherwise 404 (not-found ≡ not-authorised, no
-      // existence leak). `requireAuth` (via receiptAuth) has already guaranteed a
-      // verified user. NOTE: this scopes the *group association* only; binding the
-      // `imageKey` itself to its uploader (so a caller can't extract another
-      // user's receipt image) is tracked as a separate follow-up for the
-      // receipts-multitenancy / scan-flow phase.
+      // Object-level authorization, two orthogonal checks, both 404
+      // (not-found ≡ not-authorised, no existence leak). `requireAuth` (via
+      // receiptAuth) has already guaranteed a verified user.
+      const { sub: userId } = getUser(ctx);
+
+      // 1. Image ownership: the caller must be the user who requested the
+      // upload URL for this exact key — otherwise ANY authenticated caller
+      // could extract any other user's receipt image just by guessing/
+      // observing a valid-shaped `receipts/<uuid>.<ext>` key.
+      if (
+        !(await ctx.ReceiptUploadsRepository.isOwner(userId, ctx.body.imageKey))
+      ) {
+        ctx.set.status = 404;
+        return { code: "not_found", message: "Receipt not found" };
+      }
+
+      // 2. Group association: if the caller names a group, they must be an
+      // active member of it.
       const { groupId } = ctx.body;
       if (groupId) {
-        const { sub: userId } = getUser(ctx);
         if (!(await isGroupMember(userId, groupId))) {
           ctx.set.status = 404;
           return { code: "not_found", message: "Group not found" };
@@ -84,8 +96,8 @@ export const receiptExtractHandler = new Elysia()
          * S3 key of the uploaded receipt image. Constrained to exactly the
          * shape /receipts/upload-url generates (receipts/<uuid>.<ext>) so a
          * caller can't probe arbitrary bucket keys through this endpoint.
-         * Full per-user authorization lands with the JWT authorizer
-         * (tracked in infra/api.ts).
+         * Ownership of the key itself (not just its shape) is enforced above
+         * via `ReceiptUploadsRepository.isOwner`.
          */
         imageKey: t.String({
           pattern:

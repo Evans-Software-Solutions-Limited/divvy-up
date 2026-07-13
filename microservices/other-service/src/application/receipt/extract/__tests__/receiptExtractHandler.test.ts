@@ -1,4 +1,5 @@
-import { authHeaders } from "../../../__tests__/support/authMock";
+import { authHeaders, TEST_USER_ID } from "../../../__tests__/support/authMock";
+import { fakeReceiptUploadsRepository } from "../../../__tests__/support/fakeReceiptUploadsRepository";
 import Elysia from "elysia";
 import Anthropic from "@anthropic-ai/sdk";
 import { describe, expect, it, vi } from "vitest";
@@ -6,6 +7,7 @@ import { isGroupMember } from "@divvy-up/api-utils/auth";
 
 import { receiptExtractHandler } from "../receiptExtractHandler";
 import { ReceiptExtractRepository } from "../../../repositories/receiptExtractRepository";
+import { ReceiptUploadsRepository } from "../../../repositories/receiptUploadsRepository";
 import type {
   AnthropicVisionAdapter,
   RawVisionExtraction,
@@ -121,12 +123,18 @@ function fakeVision(
 }
 
 /** Builds a test Elysia app decorating a real repository wired with fakes,
- * mirroring the production decorate pattern in receiptExtractService.ts. */
-function appWithRepository(repository: ReceiptExtractRepository) {
-  const service = new Elysia().decorate(
-    ReceiptExtractRepository.key,
-    repository,
-  );
+ * mirroring the production decorate pattern in receiptExtractService.ts.
+ * `uploadsRepository` defaults to "the caller owns the key" so every
+ * pre-existing test (which doesn't care about ownership) stays green;
+ * pass a fake with `isOwner: async () => false` to drive the non-owner
+ * 404 path. */
+function appWithRepository(
+  repository: ReceiptExtractRepository,
+  uploadsRepository: ReceiptUploadsRepository = fakeReceiptUploadsRepository(),
+) {
+  const service = new Elysia()
+    .decorate(ReceiptExtractRepository.key, repository)
+    .decorate(ReceiptUploadsRepository.key, uploadsRepository);
   return new Elysia().use(service).use(receiptExtractHandler as never);
 }
 
@@ -173,6 +181,29 @@ describe("POST /receipts/extract", () => {
       quantity: 1,
     });
     expect(data.warnings).toBeUndefined();
+  });
+
+  it("returns 404 not_found when the caller does not own the imageKey, and never reaches the vision adapter", async () => {
+    const visionExtract = vi.fn(async () => validRawExtraction());
+    const repository = new ReceiptExtractRepository(fakeS3(), {
+      extract: visionExtract,
+    } as unknown as AnthropicVisionAdapter);
+    const isOwner = vi.fn(async () => false);
+    const app = appWithRepository(
+      repository,
+      fakeReceiptUploadsRepository({ isOwner }),
+    );
+
+    const response = await postExtract(app, { imageKey: VALID_KEY });
+
+    expect(response.status).toBe(404);
+    const data = (await response.json()) as ErrorResponseBody;
+    expect(data.code).toBe("not_found");
+    expect(isOwner).toHaveBeenCalledWith(TEST_USER_ID, VALID_KEY);
+    // Removing the ownership guard would let this reach the vision adapter
+    // and return 200 instead of 404 — this assertion is what makes that
+    // regression fail loudly rather than just changing a status code.
+    expect(visionExtract).not.toHaveBeenCalled();
   });
 
   it("returns 404 when the caller is not an active member of the passed groupId", async () => {
