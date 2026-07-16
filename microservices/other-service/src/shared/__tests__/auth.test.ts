@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { SupabaseUser } from "@divvy-up/api-utils/auth";
+import type { app as CoreApp } from "../../api";
 
 // This is the proof that the guard actually covers `.use()`d routes: `app`
 // is the REAL composed Elysia instance from api.ts (error handler → openapi
@@ -32,10 +33,20 @@ vi.mock("@divvy-up/api-utils/auth", async () => {
   };
 });
 
+// Importing `../../api` pulls in the whole app graph — the openapi plugin, the
+// AWS S3 SDK, and the Anthropic SDK — which is a ~500ms cold cost locally and
+// far more under loaded CI runners (2 vCPU, every workspace suite in parallel).
+// Done inside each `it()` it raced the 5s per-test timeout and flaked
+// intermittently; hoisting it into `beforeAll` runs it ONCE, under the
+// (generous, explicit) hook timeout, so each test only pays for `app.handle()`.
+let app: typeof CoreApp;
+
+beforeAll(async () => {
+  ({ app } = await import("../../api"));
+}, 30_000);
+
 describe("receipt-service auth guard coverage (POST /receipts/upload-url)", () => {
   it("401s with no Authorization header", async () => {
-    const { app } = await import("../../api");
-
     const response = await app.handle(
       new Request("http://localhost/receipts/upload-url", {
         method: "POST",
@@ -49,8 +60,6 @@ describe("receipt-service auth guard coverage (POST /receipts/upload-url)", () =
   });
 
   it("does not 401 with a verified Authorization header", async () => {
-    const { app } = await import("../../api");
-
     // A bad content type is enough to prove the guard let the request
     // through — the real S3ReceiptImagesAdapter rejects it before any AWS
     // call, so this stays 415, never 401, with no AWS credentials needed.

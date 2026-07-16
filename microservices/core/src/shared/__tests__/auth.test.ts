@@ -1,5 +1,6 @@
-import { describe, expect, it, vi } from "vitest";
+import { beforeAll, describe, expect, it, vi } from "vitest";
 import type { SupabaseUser } from "@divvy-up/api-utils/auth";
+import type { app as CoreApp } from "../../api";
 
 // This is the proof that the guard actually covers `.use()`d routes: `app`
 // is the REAL composed Elysia instance from api.ts (error handler → openapi
@@ -32,10 +33,19 @@ vi.mock("@divvy-up/api-utils/auth", async () => {
   };
 });
 
+// Importing `../../api` composes the whole app graph (openapi + every handler
+// plugin) — a ~1.3s cold cost locally, far more under loaded CI runners. Done
+// inside each `it()` it raced the 5s per-test timeout and flaked; hoisting it
+// into `beforeAll` runs it ONCE, under the (generous, explicit) hook timeout,
+// so each test only pays for `app.handle()`.
+let app: typeof CoreApp;
+
+beforeAll(async () => {
+  ({ app } = await import("../../api"));
+}, 30_000);
+
 describe("core auth guard coverage (GET /groups)", () => {
   it("401s with no Authorization header", async () => {
-    const { app } = await import("../../api");
-
     const response = await app.handle(new Request("http://localhost/groups"));
 
     expect(response.status).toBe(401);
@@ -43,8 +53,6 @@ describe("core auth guard coverage (GET /groups)", () => {
   });
 
   it("does not 401 with a verified Authorization header", async () => {
-    const { app } = await import("../../api");
-
     const response = await app.handle(
       new Request("http://localhost/groups", {
         headers: { Authorization: VALID_TOKEN },
