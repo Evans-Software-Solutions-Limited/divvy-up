@@ -11,6 +11,7 @@ import {
 import type { Group, Member } from "../../domain/types";
 import { isActiveMember } from "./membership";
 import { isUuid } from "./isUuid";
+import { nextColourIndex } from "./colourIndex";
 
 function toMember(row: GroupMemberRow): Member {
   return { id: row.id, groupId: row.groupId, name: row.name };
@@ -23,15 +24,6 @@ function toGroup(row: GroupRow, members: Member[]): Group {
     createdAt: row.createdAt.toISOString(),
     members,
   };
-}
-
-/** Lowest 0..7 colour slot not already used by the group's active members. */
-function nextColourIndex(usedIndexes: number[]): number {
-  const used = new Set(usedIndexes);
-  for (let i = 0; i < 8; i++) {
-    if (!used.has(i)) return i;
-  }
-  return usedIndexes.length % 8;
 }
 
 export class GroupsRepository {
