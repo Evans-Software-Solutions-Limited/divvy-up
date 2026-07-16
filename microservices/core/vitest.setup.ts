@@ -30,3 +30,12 @@ vi.mock("./src/application/repositories/settlementsRepository", async () => {
     settlementsRepo: new InMemorySettlementsRepository(),
   };
 });
+
+vi.mock("./src/application/repositories/groupInvitesRepository", async () => {
+  const { InMemoryGroupInvitesRepository } =
+    await import("./src/application/repositories/__tests__/support/inMemoryGroupInvitesRepository");
+  return {
+    GroupInvitesRepository: InMemoryGroupInvitesRepository,
+    groupInvitesRepo: new InMemoryGroupInvitesRepository(),
+  };
+});

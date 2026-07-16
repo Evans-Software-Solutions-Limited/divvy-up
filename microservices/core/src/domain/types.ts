@@ -25,6 +25,33 @@ export type Member = {
   userId?: string;
 };
 
+// ─── Group invite ─────────────────────────────────────────────────────────────
+
+/**
+ * A shareable join-by-link invite for a group. The raw token is a bearer
+ * capability returned only once at creation (see `inviteToken.ts`); this view
+ * NEVER carries the token or its hash.
+ */
+export type GroupInvite = {
+  id: string;
+  groupId: GroupId;
+  /** The placeholder seat this invite fills, if any (null = open invite → new member on accept). */
+  memberId: MemberId | null;
+  /** ISO timestamp after which the invite can no longer be redeemed. */
+  expiresAt: string;
+  /** ISO timestamp of first redemption for single-use (seat) invites; null otherwise. */
+  usedAt: string | null;
+  createdAt: string;
+};
+
+/** Minimal, pre-join preview of a group, gated only by holding a valid token. */
+export type InvitePreview = {
+  groupId: GroupId;
+  groupName: string;
+  /** Count of active members (placeholder + linked). */
+  memberCount: number;
+};
+
 // ─── Expense ──────────────────────────────────────────────────────────────────
 
 export type Expense = {
