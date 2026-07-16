@@ -4,14 +4,18 @@ import { coreAuth, getUserId } from "../../../shared/auth";
 
 const ReceiptItemInputSchema = t.Object({
   description: t.String(),
-  unitPrice: t.Number(),
-  quantity: t.Number({ default: 1 }),
+  // Integer minor currency units (pence). The split engine assumes integer
+  // pence — a fractional value breaks largest-remainder reconciliation.
+  unitPrice: t.Integer({ minimum: 0 }),
+  quantity: t.Integer({ minimum: 1, default: 1 }),
   assignment: t.Any(),
 });
 
 const AdjustmentInputSchema = t.Object({
   kind: t.Union([t.Literal("tax"), t.Literal("tip"), t.Literal("discount")]),
-  amount: t.Number(),
+  // Integer: fixed pence, or basis points when `isPercent`. Negative for
+  // discounts. Must be integral for the same reconciliation reason as above.
+  amount: t.Integer(),
   isPercent: t.Boolean({ default: false }),
 });
 
