@@ -105,3 +105,23 @@ export type Balance = {
   /** Amount in minor currency units; positive = fromMember owes toMember */
   amount: number;
 };
+
+// ─── Settlement ───────────────────────────────────────────────────────────────
+
+/**
+ * A recorded "mark-as-paid" between two members. V1 is record-keeping only —
+ * no money moves. `fromMember` has paid `toMember` `amount` pence, which
+ * cancels that much of the debt when balances are recomputed.
+ */
+export type Settlement = {
+  id: string;
+  groupId: GroupId;
+  fromMemberId: MemberId;
+  toMemberId: MemberId;
+  /** Amount paid, in minor currency units (pence). Always a positive integer. */
+  amount: number;
+  /** The authenticated user who recorded this settlement. */
+  recordedBy: string;
+  /** ISO timestamp */
+  createdAt: string;
+};

@@ -21,3 +21,12 @@ vi.mock("./src/application/repositories/expensesRepository", async () => {
     await import("./src/application/repositories/__tests__/support/inMemoryExpensesRepository");
   return { ExpensesRepository: InMemoryExpensesRepository };
 });
+
+vi.mock("./src/application/repositories/settlementsRepository", async () => {
+  const { InMemorySettlementsRepository } =
+    await import("./src/application/repositories/__tests__/support/inMemorySettlementsRepository");
+  return {
+    SettlementsRepository: InMemorySettlementsRepository,
+    settlementsRepo: new InMemorySettlementsRepository(),
+  };
+});
