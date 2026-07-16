@@ -48,22 +48,22 @@ Historical context (pre-Phase 1): `microservices/core` persisted to in-memory
 `Map`s, not Postgres — the Drizzle schema in `packages/db` was complete but
 nothing read or wrote it, so every "working" feature reset on Lambda cold start.
 
-| Tricount feature                               | Divvy Up status                                                                                                                                                  | Gap size                                   |
-| ---------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| Group create/list/view + add member            | **Backend on Postgres (Drizzle) + UI wired** as of Phase 1; live-stage smoke + per-user scoping pending                                                          | Auth scoping (Phase 2)                     |
-| Join via share link, no account                | **Absent** (full `group_invites` schema exists; no handler, no UI; no auth at all — JWT authorizer is a TODO)                                                    | **Large — this is Tricount's core UX**     |
-| **Manual expense entry (no receipt)**          | **No UI; API almost there** — `POST /expenses` exists but requires an `items` array; `expenses.receipt_image_key` is already nullable by design                  | **Small** (see below)                      |
-| Flexible splits                                | one/equal/everyone modes work through API+UI; custom weights have API+schema but **no UI editor**                                                                | Small                                      |
-| Balances                                       | Working end-to-end                                                                                                                                               | —                                          |
-| Debt simplification (min transfers)            | **Absent** — balances are computed but no settlement-suggestion algorithm                                                                                        | Small (greedy algorithm over net balances) |
-| Settle up (record payment)                     | Schema ready; UI button updates **local state only** — no POST handler                                                                                           | Small                                      |
-| Tax/tip/discount                               | Schema + types complete; `computeBalances` **explicitly skips distribution**; no handler/UI                                                                      | Medium                                     |
-| Multi-currency + conversion                    | `expenses.currency` column (GBP default); no rates, no UI                                                                                                        | Defer (GBP-only V1 is fine)                |
-| Offline + sync                                 | Mobile Expo shell merged (PR #10/#12 foundation); PowerSync designed but **not wired**; mobile has no feature screens                                            | Large (own phase, already planned)         |
-| Receipt photo + OCR                            | **Backend real as of PR #13** (upload-url + Claude vision extraction); ReceiptReview UI is a rich prototype **not wired to the API**; `/scan` CTA routes nowhere | Medium (wiring, not building)              |
-| Export / categories / stats / Splitwise import | Absent, out of V1 scope per `docs/divvy-up-product.md`                                                                                                           | Defer                                      |
-| Activity feed                                  | Schema complete (enums for expense_added/settled_up/member_added); no handler/screen                                                                             | Defer or thin slice                        |
-| Payment integration (bunq card)                | Out of scope — V1 records payments, never moves money                                                                                                            | Never (by design)                          |
+| Tricount feature                               | Divvy Up status                                                                                                                                                                                  | Gap size                               |
+| ---------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | -------------------------------------- |
+| Group create/list/view + add member            | **Backend on Postgres (Drizzle) + UI wired** as of Phase 1; live-stage smoke + per-user scoping pending                                                                                          | Auth scoping (Phase 2)                 |
+| Join via share link, no account                | **Absent** (full `group_invites` schema exists; no handler, no UI; no auth at all — JWT authorizer is a TODO)                                                                                    | **Large — this is Tricount's core UX** |
+| **Manual expense entry (no receipt)**          | **No UI; API almost there** — `POST /expenses` exists but requires an `items` array; `expenses.receipt_image_key` is already nullable by design                                                  | **Small** (see below)                  |
+| Flexible splits                                | one/equal/everyone modes work through API+UI; custom weights have API+schema but **no UI editor**                                                                                                | Small                                  |
+| Balances                                       | Working end-to-end                                                                                                                                                                               | —                                      |
+| Debt simplification (min transfers)            | **Backend done** — `GET /groups/:id/balances` now nets across all finalized expenses, subtracts recorded settlements, and minimises to fewest transfers (`simplifyDebts`/`computeGroupBalances`) | UI only                                |
+| Settle up (record payment)                     | **Backend done** — `POST/GET /groups/:id/settlements` records mark-as-paid (scoped to caller + both parties' membership); balances reflect it. UI button still local-state only                  | UI only                                |
+| Tax/tip/discount                               | Schema + types complete; `computeBalances` **explicitly skips distribution**; no handler/UI                                                                                                      | Medium                                 |
+| Multi-currency + conversion                    | `expenses.currency` column (GBP default); no rates, no UI                                                                                                                                        | Defer (GBP-only V1 is fine)            |
+| Offline + sync                                 | Mobile Expo shell merged (PR #10/#12 foundation); PowerSync designed but **not wired**; mobile has no feature screens                                                                            | Large (own phase, already planned)     |
+| Receipt photo + OCR                            | **Backend real as of PR #13** (upload-url + Claude vision extraction); ReceiptReview UI is a rich prototype **not wired to the API**; `/scan` CTA routes nowhere                                 | Medium (wiring, not building)          |
+| Export / categories / stats / Splitwise import | Absent, out of V1 scope per `docs/divvy-up-product.md`                                                                                                                                           | Defer                                  |
+| Activity feed                                  | Schema complete (enums for expense_added/settled_up/member_added); no handler/screen                                                                                                             | Defer or thin slice                    |
+| Payment integration (bunq card)                | Out of scope — V1 records payments, never moves money                                                                                                                                            | Never (by design)                      |
 
 ## Manual expense entry — the specific ask
 
@@ -111,9 +111,11 @@ are one level deeper:
    `/receipts/extract`) and delivers Tricount's join-by-link. Decide here how
    close to "no account required" to get (placeholder members + invite links
    approximate it).
-3. **Expense UX slice** — manual "Add expense" sheet (above), custom-weight
-   editor UI, settle-up POST handler, and a greedy min-transfer settlement
-   suggestion. All small; together they complete the daily-use loop.
+3. **Expense UX slice** — settle-up POST handler and the greedy min-transfer
+   settlement suggestion are ✅ **done** (settlement-aware, minimised
+   `GET /groups/:id/balances` + `POST/GET /groups/:id/settlements`). Still
+   outstanding: manual "Add expense" sheet (above) and custom-weight editor UI
+   (both client-side). Together they complete the daily-use loop.
 4. **Wire the scan flow** — `/scan` page → upload-url → PUT → extract →
    ReceiptReview on real data (backend is done; this is client wiring), plus
    tax/tip/discount distribution in `computeBalances`.
