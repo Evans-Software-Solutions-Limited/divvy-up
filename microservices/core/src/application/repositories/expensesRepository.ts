@@ -20,6 +20,32 @@ import type {
 } from "../../domain/types";
 import { isActiveMember } from "./membership";
 import { isUuid } from "./isUuid";
+import { activityText, recordActivity } from "./activityRepository";
+import { resolveActorMember } from "./resolveMember";
+
+/**
+ * The finalized expense's full receipt total in pence: the item subtotal plus
+ * every adjustment (fixed pence directly; percent adjustments — basis points —
+ * applied to the item subtotal). This is display metadata for the activity feed
+ * only — deliberately NOT the `computeBalances` "distributable subtotal" (which
+ * excludes unassigned consumption); it's "what the receipt came to", and it
+ * never feeds balance math.
+ */
+function expenseTotalPence(expense: Expense): number {
+  const subtotal = expense.items.reduce(
+    (sum, it) => sum + it.unitPrice * it.quantity,
+    0,
+  );
+  const adjustments = expense.adjustments.reduce(
+    (sum, adj) =>
+      sum +
+      (adj.isPercent
+        ? Math.round((subtotal * adj.amount) / 10000)
+        : adj.amount),
+    0,
+  );
+  return subtotal + adjustments;
+}
 
 type CreateExpenseInput = Omit<
   Expense,
@@ -508,14 +534,44 @@ export class ExpensesRepository {
       if (!expenseRow) return null;
       if (!(await isActiveMember(tx, userId, expenseRow.groupId))) return null;
 
+      // Guard the transition on `status = 'draft'` so finalize is idempotent:
+      // re-finalizing (double-tap, client retry, or re-hitting the endpoint to
+      // refresh balances) matches zero rows here and must NOT emit a second
+      // `expense_added` — the forward-only feed would otherwise accrue duplicate
+      // rows for one expense.
       const [row] = await tx
         .update(expenses)
         .set({ status: "finalized", updatedAt: new Date() })
-        .where(eq(expenses.id, expenseId))
+        .where(and(eq(expenses.id, expenseId), eq(expenses.status, "draft")))
         .returning({ id: expenses.id });
-      if (!row) return null;
 
-      return this.hydrateExpense(tx, expenseId);
+      const expense = await this.hydrateExpense(tx, expenseId);
+      if (!expense) return null; // vanished mid-transaction → 404
+      // Already finalized: return current state, but don't re-emit the feed row.
+      if (!row) return expense;
+
+      // Emit `expense_added` atomically with the finalize — finalizing is the
+      // moment the expense counts toward balances, so it's the feed-worthy event.
+      // The actor is the finalizing user's member row; a missing actor (should
+      // not happen — finalize is membership-gated above) skips the feed row
+      // rather than aborting a valid finalize.
+      const actor = await resolveActorMember(tx, userId, expenseRow.groupId);
+      if (actor) {
+        await recordActivity(tx, {
+          groupId: expenseRow.groupId,
+          actorMemberId: actor.id,
+          kind: "expense_added",
+          text: activityText.expenseAdded(
+            actor.name,
+            expense.description,
+            expenseTotalPence(expense),
+          ),
+          amount: expenseTotalPence(expense),
+          expenseId: expense.id,
+        });
+      }
+
+      return expense;
     });
   }
 

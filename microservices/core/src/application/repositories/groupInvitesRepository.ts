@@ -20,6 +20,7 @@ import { isActiveMember } from "./membership";
 import { isUuid } from "./isUuid";
 import { nextColourIndex } from "./colourIndex";
 import { generateInviteToken, hashInviteToken } from "./inviteToken";
+import { activityText, recordActivity } from "./activityRepository";
 
 // ─── Invite policy (decided for this slice; see brief §4) ──────────────────────
 //
@@ -237,6 +238,14 @@ export class GroupInvitesRepository {
             .set({ active: true })
             .where(eq(groupMembers.id, existing.id))
             .returning();
+          // A previously-removed member rejoining via the link is a member
+          // joining — emit `member_added`, actor = the joiner themselves.
+          await recordActivity(tx, {
+            groupId: invite.groupId,
+            actorMemberId: reactivated.id,
+            kind: "member_added",
+            text: activityText.memberJoined(reactivated.name),
+          });
           return {
             ok: true,
             group: await buildGroup(tx, groupRow),
@@ -285,6 +294,15 @@ export class GroupInvitesRepository {
           .update(groupInvites)
           .set({ usedAt: now })
           .where(eq(groupInvites.id, invite.id));
+
+        // Seat claimed via the link → the joiner links their account to a named
+        // placeholder. Emit `member_added`, actor = the joiner themselves.
+        await recordActivity(tx, {
+          groupId: invite.groupId,
+          actorMemberId: claimed.id,
+          kind: "member_added",
+          text: activityText.memberJoined(claimed.name),
+        });
 
         return {
           ok: true,
@@ -346,6 +364,15 @@ export class GroupInvitesRepository {
           alreadyMember: true,
         };
       }
+
+      // New member created via the link → emit `member_added`, actor = the
+      // joiner themselves (the row just created).
+      await recordActivity(tx, {
+        groupId: invite.groupId,
+        actorMemberId: inserted[0].id,
+        kind: "member_added",
+        text: activityText.memberJoined(inserted[0].name),
+      });
 
       // Open invite: intentionally NOT marked used — it stays reusable.
       return {

@@ -156,3 +156,37 @@ export type Settlement = {
   /** ISO timestamp */
   createdAt: string;
 };
+
+// ─── Activity ─────────────────────────────────────────────────────────────────
+
+export type ActivityKind = "expense_added" | "settled_up" | "member_added";
+
+/**
+ * A single entry in a group's reverse-chronological activity feed. Feed rows are
+ * a forward-only, append-only log written server-side at the moment a
+ * feed-worthy event happens (an expense is finalized, a settle-up is recorded, a
+ * member joins). `text` is a human-readable summary composed and snapshotted at
+ * write time — member names are frozen into it so the feed reads as it did then,
+ * even after a member is renamed or removed.
+ */
+export type Activity = {
+  id: string;
+  groupId: GroupId;
+  /** The member who performed the action (for member joins, the joiner). */
+  actorMemberId: MemberId;
+  kind: ActivityKind;
+  /** Server-composed, name-snapshotted summary — safe to render as-is. */
+  text: string;
+  /**
+   * Minor currency units (pence) for events that carry one (expense total,
+   * settlement amount); null for `member_added`. Display metadata only — never
+   * an input to balance math.
+   */
+  amount: number | null;
+  /** Set for `expense_added`; null otherwise (and nulled if the expense is deleted). */
+  expenseId: ExpenseId | null;
+  /** Set for `settled_up`; null otherwise (and nulled if the settlement is deleted). */
+  settlementId: string | null;
+  /** ISO timestamp */
+  createdAt: string;
+};

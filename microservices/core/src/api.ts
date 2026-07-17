@@ -17,6 +17,7 @@ import { expensesFinalizeHandler } from "./application/expenses/finalize/expense
 import { groupsBalancesHandler } from "./application/groups/balances/groupsBalancesHandler";
 import { groupsSettlementsHandler } from "./application/groups/settlements/groupsSettlementsHandler";
 import { groupsInvitesHandler } from "./application/groups/invites/groupsInvitesHandler";
+import { groupsActivityHandler } from "./application/groups/activity/groupsActivityHandler";
 
 const app = new Elysia()
   .use(coreErrorHandler) // global onError, registered first
@@ -33,7 +34,8 @@ const app = new Elysia()
   .use(expensesFinalizeHandler)
   .use(groupsBalancesHandler)
   .use(groupsSettlementsHandler)
-  .use(groupsInvitesHandler);
+  .use(groupsInvitesHandler)
+  .use(groupsActivityHandler);
 
 export type CoreApi = typeof app;
 // Exported for tests only — lets the auth-guard test exercise the real

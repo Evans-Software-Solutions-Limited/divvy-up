@@ -12,6 +12,8 @@ import type { Group, Member } from "../../domain/types";
 import { isActiveMember } from "./membership";
 import { isUuid } from "./isUuid";
 import { nextColourIndex } from "./colourIndex";
+import { activityText, recordActivity } from "./activityRepository";
+import { resolveActorMember } from "./resolveMember";
 
 function toMember(row: GroupMemberRow): Member {
   return { id: row.id, groupId: row.groupId, name: row.name };
@@ -146,32 +148,50 @@ export class GroupsRepository {
     name: string,
   ): Promise<Member | null> {
     if (!isUuid(groupId)) return null;
-    if (!(await isActiveMember(this.db, userId, groupId))) return null;
 
-    const activeMembers = await this.db
-      .select({ colourIndex: groupMembers.colourIndex })
-      .from(groupMembers)
-      .where(
-        and(eq(groupMembers.groupId, groupId), eq(groupMembers.active, true)),
+    // One transaction: the membership gate, the member insert, and the atomic
+    // activity emit share a snapshot, so a committed add always has its feed row.
+    return this.db.transaction(async (tx) => {
+      if (!(await isActiveMember(tx, userId, groupId))) return null;
+
+      const activeMembers = await tx
+        .select({ colourIndex: groupMembers.colourIndex })
+        .from(groupMembers)
+        .where(
+          and(eq(groupMembers.groupId, groupId), eq(groupMembers.active, true)),
+        );
+
+      // Known benign race: this read-then-write isn't serialised, so two
+      // concurrent addMember calls on the same group can pick the same free slot
+      // and both commit (the schema range-checks colour_index 0..7 but doesn't
+      // enforce uniqueness). Effect is cosmetic only — a duplicated palette
+      // colour, no integrity loss — and there is no real concurrency in Phase 1
+      // (single dev user). A hard fix (advisory lock or a unique constraint that
+      // tolerates the >8-member `% 8` wraparound) is deferred to groups-and-members (#5).
+      const colourIndex = nextColourIndex(
+        activeMembers.map((m) => m.colourIndex),
       );
 
-    // Known benign race: this read-then-write isn't serialised, so two
-    // concurrent addMember calls on the same group can pick the same free slot
-    // and both commit (the schema range-checks colour_index 0..7 but doesn't
-    // enforce uniqueness). Effect is cosmetic only — a duplicated palette
-    // colour, no integrity loss — and there is no real concurrency in Phase 1
-    // (single dev user). A hard fix (advisory lock or a unique constraint that
-    // tolerates the >8-member `% 8` wraparound) is deferred to groups-and-members (#5).
-    const colourIndex = nextColourIndex(
-      activeMembers.map((m) => m.colourIndex),
-    );
+      const [row] = await tx
+        .insert(groupMembers)
+        .values({ groupId, name, colourIndex, placeholder: true })
+        .returning();
 
-    const [row] = await this.db
-      .insert(groupMembers)
-      .values({ groupId, name, colourIndex, placeholder: true })
-      .returning();
+      // Direct add: the actor is the adder (the acting user's member row); the
+      // subject is the new member. A missing actor (should not happen — gated
+      // above) skips the feed row rather than failing the add.
+      const actor = await resolveActorMember(tx, userId, groupId);
+      if (actor) {
+        await recordActivity(tx, {
+          groupId,
+          actorMemberId: actor.id,
+          kind: "member_added",
+          text: activityText.memberAdded(actor.name, row.name),
+        });
+      }
 
-    return toMember(row);
+      return toMember(row);
+    });
   }
 
   _clearStore(): void {
