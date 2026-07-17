@@ -9,6 +9,8 @@ import {
 import type { Settlement } from "../../domain/types";
 import { isActiveMember } from "./membership";
 import { isUuid } from "./isUuid";
+import { activityText, recordActivity } from "./activityRepository";
+import { resolveActorMember } from "./resolveMember";
 
 export type RecordSettlementInput = {
   groupId: string;
@@ -66,30 +68,62 @@ export class SettlementsRepository {
     if (!isUuid(groupId) || !isUuid(fromMemberId) || !isUuid(toMemberId)) {
       return null;
     }
-    if (!(await isActiveMember(this.db, userId, groupId))) return null;
 
-    // Both parties must belong to THIS group — prevents recording a payment
-    // against a member id from another group (the FK alone wouldn't catch a
-    // valid id belonging to a different group). Deliberately NOT filtered on
-    // `active`: `computeBalances` derives debts from expense payer/assignment
-    // ids regardless of active status, so a debt owed to (or by) a
-    // soft-deleted member must still be settleable — otherwise removing a
-    // member would strand their outstanding balance forever.
-    const memberRows = await this.db
-      .select({ id: groupMembers.id })
-      .from(groupMembers)
-      .where(eq(groupMembers.groupId, groupId));
-    const groupMemberIds = new Set(memberRows.map((m) => m.id));
-    if (!groupMemberIds.has(fromMemberId) || !groupMemberIds.has(toMemberId)) {
-      return null;
-    }
+    // One transaction: membership/party validation, the settlement insert, and
+    // the atomic activity emit share a snapshot, so a committed settlement always
+    // has its feed row and a rolled-back one leaves none.
+    return this.db.transaction(async (tx) => {
+      if (!(await isActiveMember(tx, userId, groupId))) return null;
 
-    const [row] = await this.db
-      .insert(settlementsTable)
-      .values({ groupId, fromMemberId, toMemberId, amount, recordedBy: userId })
-      .returning();
+      // Both parties must belong to THIS group — prevents recording a payment
+      // against a member id from another group (the FK alone wouldn't catch a
+      // valid id belonging to a different group). Deliberately NOT filtered on
+      // `active`: `computeBalances` derives debts from expense payer/assignment
+      // ids regardless of active status, so a debt owed to (or by) a
+      // soft-deleted member must still be settleable — otherwise removing a
+      // member would strand their outstanding balance forever. Names are pulled
+      // here too so the feed text can be snapshotted without a second round-trip.
+      const memberRows = await tx
+        .select({ id: groupMembers.id, name: groupMembers.name })
+        .from(groupMembers)
+        .where(eq(groupMembers.groupId, groupId));
+      const nameById = new Map(memberRows.map((m) => [m.id, m.name]));
+      if (!nameById.has(fromMemberId) || !nameById.has(toMemberId)) {
+        return null;
+      }
 
-    return toSettlement(row);
+      const [row] = await tx
+        .insert(settlementsTable)
+        .values({
+          groupId,
+          fromMemberId,
+          toMemberId,
+          amount,
+          recordedBy: userId,
+        })
+        .returning();
+
+      // Actor is the recording user's member row; the text names the payer→payee
+      // pair (snapshotted). A missing actor (should not happen — gated above)
+      // skips the feed row rather than failing the settlement.
+      const actor = await resolveActorMember(tx, userId, groupId);
+      if (actor) {
+        await recordActivity(tx, {
+          groupId,
+          actorMemberId: actor.id,
+          kind: "settled_up",
+          text: activityText.settledUp(
+            nameById.get(fromMemberId) as string,
+            nameById.get(toMemberId) as string,
+            amount,
+          ),
+          amount,
+          settlementId: row.id,
+        });
+      }
+
+      return toSettlement(row);
+    });
   }
 
   /** Recorded settlements for the group, newest first. `[]` unless caller is a member. */

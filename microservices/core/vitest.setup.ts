@@ -39,3 +39,26 @@ vi.mock("./src/application/repositories/groupInvitesRepository", async () => {
     groupInvitesRepo: new InMemoryGroupInvitesRepository(),
   };
 });
+
+// Only the READ repo is swapped for the in-memory double. `recordActivity` /
+// `activityText` are preserved from the real module: the emit-site repositories
+// (expenses/settlements/groups/invites) import them, and the PGlite suites load
+// those repos via `vi.importActual`, so the write path must stay real to insert
+// actual rows. Handler tests never invoke the write path (their emit-site repos
+// are in-memory doubles), so keeping it real there is harmless.
+vi.mock(
+  "./src/application/repositories/activityRepository",
+  async (importActual) => {
+    const actual =
+      await importActual<
+        typeof import("./src/application/repositories/activityRepository")
+      >();
+    const { InMemoryActivityRepository } =
+      await import("./src/application/repositories/__tests__/support/inMemoryActivityRepository");
+    return {
+      ...actual,
+      ActivityRepository: InMemoryActivityRepository,
+      activityRepo: new InMemoryActivityRepository(),
+    };
+  },
+);

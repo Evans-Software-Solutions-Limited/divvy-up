@@ -5,6 +5,7 @@ import Login from "./pages/Login";
 import Balances from "./pages/Balances";
 import { ReceiptReview } from "./pages/ReceiptReview";
 import GroupDetail from "./pages/GroupDetail";
+import Activity from "./pages/Activity";
 import { ThemeProvider } from "./components/theme-provider";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
@@ -19,6 +20,7 @@ function App() {
           <Route path="/groups/:id" element={<GroupDetail />} />
           <Route path="/groups/:id/balances" element={<Balances />} />
           <Route path="/receipts/:id/review" element={<ReceiptReview />} />
+          <Route path="/activity" element={<Activity />} />
           <Route path="/login" element={<Login />} />
         </Routes>
       </ThemeProvider>
