@@ -15,6 +15,7 @@ function expense(
     quantity?: number;
     assignment: ItemAssignment;
   }>,
+  adjustments: Expense["adjustments"] = [],
 ): Expense {
   return {
     id: crypto.randomUUID(),
@@ -30,7 +31,7 @@ function expense(
       quantity: it.quantity ?? 1,
       assignment: it.assignment,
     })),
-    adjustments: [],
+    adjustments,
     status: "finalized",
     currency: "GBP",
   };
@@ -110,5 +111,24 @@ describe("computeGroupBalances", () => {
 
   it("ignores the empty case", () => {
     expect(computeGroupBalances(GROUP, [], ["a", "b"], [])).toEqual([]);
+  });
+
+  it("inherits adjustment distribution from computeBalances", () => {
+    // a and b split a £20 item; a paid. A £2 fixed tax splits 1:1, so b's
+    // £1 tax share rides along into the group view → b owes a £11 total.
+    const e = expense(
+      "a",
+      [
+        {
+          unitPrice: 2000,
+          assignment: { type: "equal", memberIds: ["a", "b"] },
+        },
+      ],
+      [{ kind: "tax", amount: 200, isPercent: false }],
+    );
+    const balances = computeGroupBalances(GROUP, [e], ["a", "b"], []);
+    expect(balances).toEqual([
+      { groupId: GROUP, fromMemberId: "b", toMemberId: "a", amount: 1100 },
+    ]);
   });
 });

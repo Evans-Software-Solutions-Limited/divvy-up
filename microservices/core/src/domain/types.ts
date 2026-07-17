@@ -112,9 +112,13 @@ export type AdjustmentKind = "tax" | "tip" | "discount";
 
 export type ReceiptAdjustment = {
   kind: AdjustmentKind;
-  /** Amount in minor currency units; negative for discounts */
+  /**
+   * When `isPercent` is false: a fixed amount in minor currency units (pence).
+   * When `isPercent` is true: a rate in *basis points* (1250 = 12.50%) applied
+   * to the subtotal. Discounts are stored negative in both cases.
+   */
   amount: number;
-  /** If true the amount is a percentage of the subtotal (0–100) */
+  /** If true, `amount` is a basis-point rate rather than fixed pence. */
   isPercent: boolean;
 };
 
