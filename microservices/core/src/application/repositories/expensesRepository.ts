@@ -110,8 +110,9 @@ function parseAssignment(assignment: ItemAssignment): ParsedAssignment {
         })),
       };
     case "everyone":
-      // Resolved dynamically at finalize — that's the schema's design, so no
-      // item_assignments rows are stored for `everyone`.
+      // A DRAFT `everyone` item stores no member rows: it means "whoever is in
+      // the group", resolved live for the draft preview. `finalize` materialises
+      // it into explicit `equal` rows — see `freezeEveryoneItems`.
       return { mode: "everyone", rows: [] };
     case "custom": {
       const weighted = normaliseCustomWeights(assignment.shares);
@@ -222,6 +223,25 @@ function groupBy<T, K>(items: T[], key: (item: T) => K): Map<K, T[]> {
 /** Anything that exposes `.select` the way `Db` and a `Db` transaction both do. */
 type SelectCapable = Pick<Db, "select">;
 
+/**
+ * The order every read of `item_assignments` uses: by MEMBER id.
+ *
+ * Row order is not cosmetic: `computeBalances` feeds the member list straight
+ * into `splitPence`, whose largest-remainder tie-break gives the odd penny to
+ * the EARLIEST participants. So the order rows come back in decides who pays
+ * the extra penny of a £10-across-3 item.
+ *
+ * `item_assignments.id` is a random uuid, so ordering by it would make that a
+ * coin flip per expense — and, worse, a *different* coin flip from the order the
+ * members were resolved in when `finalize` froze them, which is what would make
+ * the freeze shift a penny relative to the split the user just reviewed.
+ * `member_id` is the one key both sides share: `activeMemberIds` resolves
+ * members in `id` order, so a frozen split hydrates in exactly the order it was
+ * written. (Postgres compares uuids bytewise, which matches a lexicographic sort
+ * of their canonical lowercase-hex text form — so clients can reproduce it.)
+ */
+const assignmentRowOrder = asc(itemAssignments.memberId);
+
 export class ExpensesRepository {
   static readonly key = "ExpensesRepository";
 
@@ -241,6 +261,97 @@ export class ExpensesRepository {
       this._db = this.injectedDb ?? getDb();
     }
     return this._db;
+  }
+
+  /**
+   * Active member ids of `groupId`, in a deterministic order (`id` ascending).
+   *
+   * The order matters: it becomes the participant order of a frozen `everyone`
+   * split, and `splitPence`'s largest-remainder tie-break hands the odd penny
+   * to the earliest participants. Ordering here keeps a freeze reproducible
+   * rather than dependent on Postgres' physical row order.
+   */
+  private async activeMemberIds(
+    executor: SelectCapable,
+    groupId: string,
+  ): Promise<string[]> {
+    const rows = await executor
+      .select({ id: groupMembers.id })
+      .from(groupMembers)
+      .where(
+        and(eq(groupMembers.groupId, groupId), eq(groupMembers.active, true)),
+      )
+      .orderBy(asc(groupMembers.id));
+    return rows.map((r) => r.id);
+  }
+
+  /**
+   * Freeze every `everyone` item of `expenseId` into an explicit `equal` split
+   * over the group's active members **as of now**.
+   *
+   * Why: `everyone` carries no `item_assignments` rows, so it can only be
+   * resolved against a member list supplied at read time. For a FINALIZED
+   * (immutable) expense that made its balances silently drift whenever
+   * membership changed — a member added next week retroactively owed a share of
+   * last week's dinner, and the original diners' shares shrank. Materialising
+   * the participant set makes a finalized expense self-describing and therefore
+   * membership-independent for good.
+   *
+   * Representation: mode flips `everyone` → `equal` with one row per member,
+   * rather than keeping the `everyone` mode alongside snapshot rows. `equal`
+   * already means exactly "these N people, evenly", so nothing downstream needs
+   * to learn a second way to read a frozen split — and no finalized expense is
+   * left carrying a mode that begs to be resolved at read time.
+   *
+   * The numbers don't move: `equal` and `everyone` take the same code path in
+   * `computeBalances` (all-1 weights over the participant list), and the frozen
+   * rows hydrate in the same `member_id` order they were resolved in (see
+   * `assignmentRowOrder` — without that agreement the largest-remainder odd
+   * penny would land on a different member after freezing).
+   *
+   * Callers must invoke this INSIDE the finalize transaction and only on the
+   * guarded draft→finalized transition, so a rolled-back finalize leaves no
+   * frozen rows and a re-finalize freezes nothing twice.
+   */
+  private async freezeEveryoneItems(
+    executor: SelectCapable & Pick<Db, "insert" | "update">,
+    expenseId: string,
+    groupId: string,
+  ): Promise<void> {
+    const everyoneItems = await executor
+      .select({ id: receiptItems.id })
+      .from(receiptItems)
+      .where(
+        and(
+          eq(receiptItems.expenseId, expenseId),
+          eq(receiptItems.assignmentMode, "everyone"),
+        ),
+      );
+    if (everyoneItems.length === 0) return;
+
+    const memberIds = await this.activeMemberIds(executor, groupId);
+
+    for (const item of everyoneItems) {
+      // An `everyone` item provably has no rows yet (both writers delete them),
+      // so a plain insert is right — a unique violation here would mean corrupt
+      // data and correctly aborts the finalize.
+      if (memberIds.length > 0) {
+        await executor.insert(itemAssignments).values(
+          memberIds.map((memberId) => ({
+            itemId: item.id,
+            memberId,
+            shareWeight: null,
+          })),
+        );
+      }
+      // No active members (not reachable via finalize, which is membership-
+      // gated): `equal` with zero rows is the same no-op in the split math that
+      // `everyone` against an empty list was.
+      await executor
+        .update(receiptItems)
+        .set({ assignmentMode: "equal" })
+        .where(eq(receiptItems.id, item.id));
+    }
   }
 
   private async hydrateExpense(
@@ -266,12 +377,7 @@ export class ExpensesRepository {
             .select()
             .from(itemAssignments)
             .where(inArray(itemAssignments.itemId, itemIds))
-            // Stable order across reads (id is immutable). Row order carries no
-            // semantic weight — each `custom` row is self-contained (memberId +
-            // its weight) and the split math is order-independent — but without
-            // an explicit ORDER BY the DB could hand back `equal`/`custom` member
-            // arrays in a different order between reads of the same expense.
-            .orderBy(asc(itemAssignments.id))
+            .orderBy(assignmentRowOrder)
         : [];
     const assignmentsByItem: Map<string, AssignmentRow[]> = groupBy(
       assignmentRows,
@@ -299,16 +405,9 @@ export class ExpensesRepository {
         throw new Error(`Group not found: ${input.groupId}`);
       }
 
-      const activeMembers = await tx
-        .select({ id: groupMembers.id })
-        .from(groupMembers)
-        .where(
-          and(
-            eq(groupMembers.groupId, input.groupId),
-            eq(groupMembers.active, true),
-          ),
-        );
-      const activeMemberIds = new Set(activeMembers.map((m) => m.id));
+      const activeMemberIds = new Set(
+        await this.activeMemberIds(tx, input.groupId),
+      );
 
       if (!activeMemberIds.has(input.payerId)) {
         throw new Error(
@@ -421,7 +520,7 @@ export class ExpensesRepository {
             .select()
             .from(itemAssignments)
             .where(inArray(itemAssignments.itemId, itemIds))
-            .orderBy(asc(itemAssignments.id)) // stable across reads — see hydrateExpense
+            .orderBy(assignmentRowOrder)
         : [];
 
     const adjustmentRows = await this.db
@@ -456,10 +555,22 @@ export class ExpensesRepository {
     const parsed = parseAssignment(assignment);
 
     return this.db.transaction(async (tx) => {
+      // Locked because the freeze decision below turns on `status`, and a
+      // concurrent `finalize` moves it. Without the lock (READ COMMITTED): this
+      // transaction reads `draft`, finalize commits, then this one writes an
+      // `everyone` mode onto a now-finalized expense — leaving a finalized
+      // expense with no participants, whose item silently drops out of balances.
+      // Locking makes the two serialise: whichever runs second sees the other's
+      // committed state and either freezes here or freezes in finalize.
+      //
+      // `no key update` rather than `update`: it still conflicts with finalize's
+      // `UPDATE`, but not with the `FOR KEY SHARE` locks taken by inserts that
+      // reference this row (an `activity` row's `expense_id`, say).
       const [expenseRow] = await tx
         .select()
         .from(expenses)
-        .where(eq(expenses.id, expenseId));
+        .where(eq(expenses.id, expenseId))
+        .for("no key update");
       if (!expenseRow) return null;
       if (!(await isActiveMember(tx, userId, expenseRow.groupId))) return null;
 
@@ -474,17 +585,21 @@ export class ExpensesRepository {
         );
       if (!itemRow) return null;
 
-      if (parsed.rows.length > 0) {
-        const activeMembers = await tx
-          .select({ id: groupMembers.id })
-          .from(groupMembers)
-          .where(
-            and(
-              eq(groupMembers.groupId, expenseRow.groupId),
-              eq(groupMembers.active, true),
-            ),
-          );
-        const activeMemberIds = new Set(activeMembers.map((m) => m.id));
+      // Assigning `everyone` on an ALREADY-FINALIZED expense freezes on the
+      // spot, for the same reason `finalize` does: a finalized expense must
+      // never be left carrying a membership-dependent split, or its balances
+      // start drifting again. (Whether a finalized expense should be editable
+      // at all is a separate immutability question, untouched here.)
+      const freezeNow =
+        parsed.mode === "everyone" && expenseRow.status === "finalized";
+
+      // What actually gets written: `parsed`, except a finalized `everyone`
+      // becomes the frozen `equal` set.
+      let effective = parsed;
+
+      if (parsed.rows.length > 0 || freezeNow) {
+        const activeIds = await this.activeMemberIds(tx, expenseRow.groupId);
+        const activeMemberIds = new Set(activeIds);
         for (const row of parsed.rows) {
           if (!activeMemberIds.has(row.memberId)) {
             throw new Error(
@@ -492,20 +607,29 @@ export class ExpensesRepository {
             );
           }
         }
+        if (freezeNow) {
+          effective = {
+            mode: "equal",
+            rows: activeIds.map((memberId) => ({
+              memberId,
+              shareWeight: null,
+            })),
+          };
+        }
       }
 
       await tx
         .update(receiptItems)
-        .set({ assignmentMode: parsed.mode })
+        .set({ assignmentMode: effective.mode })
         .where(eq(receiptItems.id, itemId));
 
       await tx
         .delete(itemAssignments)
         .where(eq(itemAssignments.itemId, itemId));
 
-      if (parsed.rows.length > 0) {
+      if (effective.rows.length > 0) {
         await tx.insert(itemAssignments).values(
-          parsed.rows.map((row) => ({
+          effective.rows.map((row) => ({
             itemId,
             memberId: row.memberId,
             shareWeight: row.shareWeight,
@@ -544,6 +668,15 @@ export class ExpensesRepository {
         .set({ status: "finalized", updatedAt: new Date() })
         .where(and(eq(expenses.id, expenseId), eq(expenses.status, "draft")))
         .returning({ id: expenses.id });
+
+      // Freeze `everyone` splits into explicit members BEFORE hydrating, so the
+      // returned expense (and the balances the caller derives from it) already
+      // reflect the frozen participant set. Inside the transition guard, so a
+      // re-finalize can't double-insert and a rolled-back finalize freezes
+      // nothing.
+      if (row) {
+        await this.freezeEveryoneItems(tx, expenseId, expenseRow.groupId);
+      }
 
       const expense = await this.hydrateExpense(tx, expenseId);
       if (!expense) return null; // vanished mid-transaction → 404

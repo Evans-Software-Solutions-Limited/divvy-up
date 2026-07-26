@@ -75,8 +75,19 @@ function computeSplit(items: ReceiptItem[], memberIds: string[]) {
       unassigned += amt;
       continue;
     }
-    const parts = splitPence(amt, weights);
-    targets.forEach((id, i) => {
+    // Split in member-id order, because that's the order the server reads the
+    // item's members back in — and `splitPence`'s largest-remainder tie-break
+    // gives the odd penny to the earliest participant. Previewing in selection
+    // order instead would show a 1p-different split from the balances that
+    // appear after finalizing. Weights travel with their member.
+    const ordered = targets
+      .map((id, i) => [id, weights[i]] as const)
+      .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+    const parts = splitPence(
+      amt,
+      ordered.map(([, w]) => w),
+    );
+    ordered.forEach(([id], i) => {
       per[id] = (per[id] ?? 0) + parts[i];
     });
   }
@@ -518,7 +529,11 @@ export function ReceiptReview() {
       })),
     [group?.members],
   );
-  const memberIds = useMemo(() => members.map((m) => m.id), [members]);
+  // Sorted by id to match the order the server freezes an `everyone` split in
+  // (it resolves members by id, and reads them back the same way). The order
+  // decides who takes the largest-remainder odd penny, so an unsorted list would
+  // let this preview disagree by 1p with the balances shown after finalizing.
+  const memberIds = useMemo(() => members.map((m) => m.id).sort(), [members]);
   const split = useMemo(
     () => computeSplit(items, memberIds),
     [items, memberIds],
@@ -539,7 +554,7 @@ export function ReceiptReview() {
   }
 
   async function handleFinalize() {
-    await finalize.mutateAsync(memberIds);
+    await finalize.mutateAsync();
     setSaved(true);
   }
 

@@ -124,7 +124,13 @@ describe("POST /expenses/:id/finalize", () => {
     expect(data.balances.every((b) => b.amount === 800)).toBe(true);
   });
 
-  it("resolves 'everyone' assignments when memberIds provided", async () => {
+  it("freezes 'everyone' server-side and ignores any client-supplied member list", async () => {
+    expensesRepo._setGroupMemberIds("group-1", [
+      "member-1",
+      "member-2",
+      "member-3",
+      "member-4",
+    ]);
     const expense = await expensesRepo.create(TEST_USER_ID, {
       groupId: "group-1",
       payerId: "member-1",
@@ -145,9 +151,9 @@ describe("POST /expenses/:id/finalize", () => {
       new Request(`http://localhost/expenses/${expense.id}/finalize`, {
         method: "POST",
         headers: { "Content-Type": "application/json", ...authHeaders() },
-        body: JSON.stringify({
-          memberIds: ["member-1", "member-2", "member-3", "member-4"],
-        }),
+        // A stale client still sending the (now removed) member list — and
+        // deliberately a *wrong* one, to prove it has no influence.
+        body: JSON.stringify({ memberIds: ["member-1", "member-2"] }),
       }),
     );
 
@@ -155,7 +161,10 @@ describe("POST /expenses/:id/finalize", () => {
       expense: Expense;
       balances: Balance[];
     };
-    // 4 members, payer excluded from owing: 3 balance entries of 300 each
+    // Split over the group's 4 members (frozen at finalize), payer excluded from
+    // owing: 3 × 300. The body asked for a 2-way split and got no say — the
+    // participant set is the repository's to freeze, not the caller's to dictate.
+    expect(response.status).toBe(200);
     expect(data.balances).toHaveLength(3);
     expect(data.balances.every((b) => b.amount === 300)).toBe(true);
   });

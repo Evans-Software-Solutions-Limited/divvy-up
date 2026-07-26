@@ -26,12 +26,22 @@ export class InMemoryExpensesRepository {
   /** In-memory store — stands in for Postgres until DB is wired */
   private readonly store = new Map<string, Expense>();
   private readonly membersByGroup = new Map<string, Set<string>>();
+  private readonly memberIdsByGroup = new Map<string, string[]>();
 
   /** Test-only: register `userId` as an active member of `groupId`. */
   _addMember(groupId: string, userId: string): void {
     const members = this.membersByGroup.get(groupId) ?? new Set<string>();
     members.add(userId);
     this.membersByGroup.set(groupId, members);
+  }
+
+  /**
+   * Test-only: the group's `group_members` ids — the roster `finalize` freezes
+   * an `everyone` split over. Distinct from `_addMember`, which registers the
+   * *user* ids used for the ownership check.
+   */
+  _setGroupMemberIds(groupId: string, memberIds: string[]): void {
+    this.memberIdsByGroup.set(groupId, memberIds);
   }
 
   private isMember(userId: string, groupId: string): boolean {
@@ -79,21 +89,66 @@ export class InMemoryExpensesRepository {
     const expense = this.store.get(expenseId);
     if (!expense) return null;
     if (!this.isMember(userId, expense.groupId)) return null;
+    // The real repository freezes here too, not just in `finalize`: setting
+    // `everyone` on an already-finalized expense would otherwise leave it with a
+    // membership-dependent split.
+    const effective: ItemAssignment =
+      assignment.type === "everyone" && expense.status === "finalized"
+        ? { type: "equal", memberIds: this.frozenMemberIds(expense.groupId) }
+        : assignment;
     const updated: Expense = {
       ...expense,
       items: expense.items.map((item) =>
-        item.id === itemId ? { ...item, assignment } : item,
+        item.id === itemId ? { ...item, assignment: effective } : item,
       ),
     };
     this.store.set(expenseId, updated);
     return updated;
   }
 
+  /**
+   * The roster an `everyone` split freezes over, in the same member-id order the
+   * real repository resolves and re-reads it in.
+   *
+   * Throws when unset: the real repository can never freeze over an empty roster
+   * (finalize is membership-gated), and freezing to an empty `equal` split would
+   * silently zero the balances — letting a test "pass" by asserting nothing.
+   */
+  private frozenMemberIds(groupId: string): string[] {
+    const memberIds = this.memberIdsByGroup.get(groupId) ?? [];
+    if (memberIds.length === 0) {
+      throw new Error(
+        `InMemoryExpensesRepository: no member roster for group ${groupId} — call _setGroupMemberIds() before finalizing an "everyone" expense`,
+      );
+    }
+    return [...memberIds].sort();
+  }
+
   async finalize(userId: string, expenseId: string): Promise<Expense | null> {
     const expense = this.store.get(expenseId);
     if (!expense) return null;
     if (!this.isMember(userId, expense.groupId)) return null;
-    const finalized: Expense = { ...expense, status: "finalized" };
+    // Already finalized: return as-is, mirroring the real repo's draft-only
+    // transition guard (so a re-finalize can't re-freeze against a roster that
+    // has changed since).
+    if (expense.status === "finalized") return expense;
+
+    // Freeze `everyone` items into an explicit equal split, as the real
+    // repository does — a finalized expense must never be left with a
+    // membership-dependent split.
+    const hasEveryone = expense.items.some(
+      (item) => item.assignment.type === "everyone",
+    );
+    const memberIds = hasEveryone ? this.frozenMemberIds(expense.groupId) : [];
+    const finalized: Expense = {
+      ...expense,
+      status: "finalized",
+      items: expense.items.map((item) =>
+        item.assignment.type === "everyone"
+          ? { ...item, assignment: { type: "equal", memberIds } }
+          : item,
+      ),
+    };
     this.store.set(expenseId, finalized);
     return finalized;
   }
@@ -102,6 +157,10 @@ export class InMemoryExpensesRepository {
   _clearStore(): void {
     this.store.clear();
     this.membersByGroup.clear();
+    // Also the freeze roster — a roster leaking into a later test would let it
+    // finalize an `everyone` expense it never declared members for, defeating
+    // the guard in `frozenMemberIds` and failing confusingly under `.only`.
+    this.memberIdsByGroup.clear();
   }
 }
 

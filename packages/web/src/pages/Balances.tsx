@@ -274,24 +274,36 @@ export function Balances() {
   const payee = payeeEntry?.member;
   const payeeColor = payeeEntry ? memberColor(payeeEntry.index) : "var(--p1)";
 
-  // Debts owed TO the payee
-  const debts = balances
+  // Debts owed TO the payee.
+  //
+  // A debtor missing from `memberMap` is someone who has since been removed from
+  // the group (`group.members` is active-only) — they still owe their frozen
+  // share of expenses finalized while they were in it, so the row is labelled
+  // rather than dropped. Dropping it made money quietly disappear from the
+  // screen, with no way to settle it. (Showing their real name needs the API to
+  // return former members; a placeholder is the honest interim.)
+  const debts: {
+    key: string;
+    member: Member;
+    color: string;
+    amount: number;
+  }[] = balances
     .filter((b) => b.toMemberId === payeeId)
     .map((b) => {
       const entry = memberMap.get(b.fromMemberId);
       return {
         key: b.fromMemberId,
-        member: entry?.member,
+        member:
+          entry?.member ??
+          ({
+            id: b.fromMemberId,
+            groupId: group.id,
+            name: "Former member",
+          } satisfies Member),
         color: entry ? memberColor(entry.index) : "var(--p2)",
         amount: b.amount,
       };
-    })
-    .filter((d) => d.member != null) as {
-    key: string;
-    member: Member;
-    color: string;
-    amount: number;
-  }[];
+    });
 
   const unsettledDebts = debts.filter((d) => !settledIds.includes(d.key));
   const owedTotal = unsettledDebts.reduce((acc, d) => acc + d.amount, 0);

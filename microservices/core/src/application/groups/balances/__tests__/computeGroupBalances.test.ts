@@ -62,7 +62,7 @@ describe("computeGroupBalances", () => {
         assignment: { type: "equal", memberIds: ["a", "b", "c"] },
       },
     ]);
-    const balances = computeGroupBalances(GROUP, [e], ["a", "b", "c"], []);
+    const balances = computeGroupBalances(GROUP, [e], []);
     // b→a 1000, c→a 1000
     expect(balances).toHaveLength(2);
     expect(
@@ -78,7 +78,6 @@ describe("computeGroupBalances", () => {
     const balances = computeGroupBalances(
       GROUP,
       [e],
-      ["a", "b"],
       [settlement("b", "a", 400)],
     );
     expect(balances).toEqual([
@@ -93,24 +92,39 @@ describe("computeGroupBalances", () => {
     const balances = computeGroupBalances(
       GROUP,
       [e],
-      ["a", "b"],
       [settlement("b", "a", 1000)],
     );
     expect(balances).toEqual([]);
   });
 
-  it("resolves 'everyone' assignments using the member list", () => {
+  it("takes a finalized expense's split from the expense itself, not the group's membership", () => {
+    // The frozen split names b and c; a paid. Whoever else is in the group today
+    // is irrelevant — there is no member-list input to be influenced by.
+    const e = expense("a", [
+      {
+        unitPrice: 900,
+        assignment: { type: "equal", memberIds: ["b", "c"] },
+      },
+    ]);
+    const balances = computeGroupBalances(GROUP, [e], []);
+    expect(balances).toHaveLength(2);
+    expect(balances.every((x) => x.amount === 450)).toBe(true);
+  });
+
+  it("throws rather than silently dropping an unfrozen 'everyone' item", () => {
+    // Not reachable through the app — finalize freezes `everyone` into `equal`
+    // rows, and migration 0003 backfilled expenses finalized before it did. The
+    // remaining way to get here is deploying the code without running the
+    // migration, where under-reporting a debt to zero would be far worse than
+    // failing loudly.
     const e = expense("a", [
       { unitPrice: 900, assignment: { type: "everyone" } },
     ]);
-    const balances = computeGroupBalances(GROUP, [e], ["a", "b", "c"], []);
-    // £9 split three ways = £3 each; payer a excluded → b and c owe 300.
-    expect(balances).toHaveLength(2);
-    expect(balances.every((x) => x.amount === 300)).toBe(true);
+    expect(() => computeGroupBalances(GROUP, [e], [])).toThrow(/unfrozen/);
   });
 
   it("ignores the empty case", () => {
-    expect(computeGroupBalances(GROUP, [], ["a", "b"], [])).toEqual([]);
+    expect(computeGroupBalances(GROUP, [], [])).toEqual([]);
   });
 
   it("inherits adjustment distribution from computeBalances", () => {
@@ -126,7 +140,7 @@ describe("computeGroupBalances", () => {
       ],
       [{ kind: "tax", amount: 200, isPercent: false }],
     );
-    const balances = computeGroupBalances(GROUP, [e], ["a", "b"], []);
+    const balances = computeGroupBalances(GROUP, [e], []);
     expect(balances).toEqual([
       { groupId: GROUP, fromMemberId: "b", toMemberId: "a", amount: 1100 },
     ]);

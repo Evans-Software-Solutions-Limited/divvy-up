@@ -199,9 +199,15 @@ export const receiptItems = pgTable(
     description: text("description").notNull(),
     unitPrice: integer("unit_price").notNull(), // PENCE
     quantity: integer("quantity").notNull().default(1),
-    // The item's assignment MODE lives here (null = unassigned). `everyone` is stored as the mode
-    // alone with NO item_assignments rows, so it resolves dynamically to the group's CURRENT
-    // members at finalize. `one`/`equal`/`custom` carry member rows in item_assignments.
+    // The item's assignment MODE lives here (null = unassigned). `one`/`equal`/`custom` carry
+    // explicit member rows in item_assignments; `everyone` carries NO rows and means "whoever is
+    // in the group", resolved against a member list supplied at read time.
+    //
+    // `everyone` therefore only survives on a DRAFT: finalizing an expense rewrites each
+    // `everyone` item to `equal` + one row per active member (ExpensesRepository.finalize →
+    // freezeEveryoneItems). That freeze is what makes a finalized expense's balances immune to
+    // later membership changes — without it, adding a member next week would retroactively
+    // redistribute last week's dinner.
     assignmentMode: assignmentMode("assignment_mode"), // null until assigned
     // `real` (float4), NOT `numeric` — Drizzle maps `numeric` to a JS string, which would break
     // the split engine's `conf < 0.7` and the wire `confidence: number`. `real` returns a number.
@@ -223,7 +229,8 @@ export const receiptItems = pgTable(
 // ─── item_assignments ── (join: item ↔ member; member rows for one|equal|custom)
 // The MODE lives on receipt_items. This table holds the explicit member list for `one` (1 row),
 // `equal` (N rows), and `custom` (N rows, each with a positive integer weight). `everyone` and
-// `unassigned` items have NO rows here.
+// `unassigned` items have NO rows here — and a finalized expense never has `everyone` items,
+// because finalize freezes them into `equal` rows (see receipt_items.assignment_mode).
 
 export const itemAssignments = pgTable(
   "item_assignments",
