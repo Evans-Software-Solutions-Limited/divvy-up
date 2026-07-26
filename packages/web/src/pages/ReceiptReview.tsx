@@ -36,6 +36,8 @@ interface Member {
   id: string;
   name: string;
   color: string;
+  /** False for a member removed from the group — nameable, but not assignable. */
+  active: boolean;
 }
 
 function computeSplit(items: ReceiptItem[], memberIds: string[]) {
@@ -95,12 +97,21 @@ function computeSplit(items: ReceiptItem[], memberIds: string[]) {
   return { perPerson: per, unassigned, itemsSubtotal, total: itemsSubtotal };
 }
 
+/**
+ * @param roster         Everyone the group has had, former members included —
+ *                       used to NAME an assignment, which on a finalized expense
+ *                       can still reference someone who has left.
+ * @param activeMembers  Current members — who an `everyone` split will actually
+ *                       be frozen over.
+ */
 function AssignBadge({
   assignment,
-  allMembers,
+  roster,
+  activeMembers,
 }: {
   assignment: ItemAssignment | null;
-  allMembers: Member[];
+  roster: Member[];
+  activeMembers: Member[];
 }) {
   if (!assignment) {
     return (
@@ -130,7 +141,7 @@ function AssignBadge({
           borderRadius: 999,
         }}
       >
-        <AvatarStack members={allMembers} size={18} max={4} />
+        <AvatarStack members={activeMembers} size={18} max={4} />
         <span
           style={{ fontSize: 11.5, fontWeight: 700, color: "var(--ink-2)" }}
         >
@@ -145,8 +156,10 @@ function AssignBadge({
       : assignment.type === "equal"
         ? assignment.memberIds
         : assignment.shares.map((s) => s.memberId);
+  // Resolved against the full roster: a frozen assignment naming someone who has
+  // since left should still show their avatar, not silently lose a participant.
   const assigned = ids
-    .map((id) => allMembers.find((m) => m.id === id))
+    .map((id) => roster.find((m) => m.id === id))
     .filter(Boolean) as Member[];
   return assigned.length === 1 ? (
     <Avatar name={assigned[0].name} color={assigned[0].color} size={26} />
@@ -155,6 +168,10 @@ function AssignBadge({
   );
 }
 
+/**
+ * @param allMembers Current members only — this editor OFFERS choices, and the
+ *                   server rejects an assignment naming a removed member.
+ */
 function ItemEditor({
   item,
   allMembers,
@@ -176,16 +193,23 @@ function ItemEditor({
           ? "everyone"
           : "everyone",
   );
-  const [selectedIds, setSelectedIds] = useState<string[]>(
-    init
-      ? init.type === "one"
-        ? [init.memberId]
-        : init.type === "equal"
-          ? init.memberIds
-          : init.type === "everyone"
-            ? allMembers.map((m) => m.id)
-            : init.shares.map((s) => s.memberId)
-      : [],
+  const initialIds = !init
+    ? []
+    : init.type === "one"
+      ? [init.memberId]
+      : init.type === "equal"
+        ? init.memberIds
+        : init.type === "everyone"
+          ? allMembers.map((m) => m.id)
+          : init.shares.map((s) => s.memberId);
+  // Anyone in the current assignment who has since left the group. They can't
+  // stay selected — the server rejects an assignment naming an inactive member —
+  // so saving drops them and their share moves to whoever remains. That's real
+  // money moving, so it's called out below rather than done silently.
+  const offered = new Set(allMembers.map((m) => m.id));
+  const droppedIds = initialIds.filter((id) => !offered.has(id));
+  const [selectedIds, setSelectedIds] = useState<string[]>(() =>
+    initialIds.filter((id) => offered.has(id)),
   );
 
   const modes: [AssignMode, string][] = [
@@ -318,6 +342,26 @@ function ItemEditor({
         >
           {modeHint[mode]}
         </div>
+        {/* Someone in this item's current split has left the group. Saving will
+            re-split without them, which changes what everyone else owes — so say
+            so before it happens. */}
+        {droppedIds.length > 0 && (
+          <div
+            style={{
+              fontSize: 12.5,
+              fontWeight: 700,
+              color: "#3A1B02",
+              background: "var(--amber)",
+              borderRadius: 10,
+              padding: "9px 11px",
+              marginBottom: 10,
+            }}
+          >
+            {droppedIds.length === 1
+              ? "Someone in this split has left the group. Saving removes their share and divides it between the people above."
+              : `${droppedIds.length} people in this split have left the group. Saving removes their shares and divides them between the people above.`}
+          </div>
+        )}
       </div>
       <div
         style={{
@@ -505,7 +549,15 @@ export function ReceiptReview() {
 
   const { data: rawGroup } = useGetGroup(expense?.groupId);
   const group = rawGroup as
-    | { members: Array<{ id: string; name: string }> }
+    | {
+        members: Array<{
+          id: string;
+          name: string;
+          /** False for a member removed from the group. */
+          active?: boolean;
+          colourIndex?: number;
+        }>;
+      }
     | null
     | undefined;
 
@@ -520,14 +572,29 @@ export function ReceiptReview() {
   const [editing, setEditing] = useState<ReceiptItem | null>(null);
   const [saved, setSaved] = useState(false);
 
-  const members: Member[] = useMemo(
+  // Two lists, deliberately. `roster` is everyone the group has ever had,
+  // including removed members (`active: false`), and exists only so an
+  // assignment frozen against a since-removed member can still be NAMED. Colour
+  // comes from the server-assigned slot, not the array index, so a former member
+  // mid-roster doesn't shift the palette for everyone after them.
+  const roster: Member[] = useMemo(
     () =>
       (group?.members ?? []).map((m, i) => ({
         id: m.id,
         name: m.name,
-        color: memberColor(i),
+        color: memberColor(m.colourIndex ?? i),
+        active: m.active !== false,
       })),
     [group?.members],
+  );
+  // `members` is who can be ASSIGNED to — current members only. The write path
+  // rejects an inactive member outright (with a bare 500, not a friendly error),
+  // and an `everyone` split freezes over active members, so offering a former
+  // member here would produce either a failed save or a preview that disagrees
+  // with the finalized split.
+  const members: Member[] = useMemo(
+    () => roster.filter((m) => m.active),
+    [roster],
   );
   // Sorted by id to match the order the server freezes an `everyone` split in
   // (it resolves members by id, and reads them back the same way). The order
@@ -537,6 +604,16 @@ export function ReceiptReview() {
   const split = useMemo(
     () => computeSplit(items, memberIds),
     [items, memberIds],
+  );
+  // Who gets a column in the per-person bar: every current member, plus anyone
+  // who has LEFT but still holds a share of this receipt. An `equal`/`custom`
+  // assignment made before they left keeps their `item_assignments` row, so
+  // `computeSplit` really does attribute pence to them — showing only current
+  // members would hide part of a live debt and leave the columns not adding up
+  // to the receipt total.
+  const shareHolders = useMemo(
+    () => roster.filter((m) => m.active || (split.perPerson[m.id] ?? 0) !== 0),
+    [roster, split.perPerson],
   );
   const flagged = items.filter((it) => !it.assignment);
 
@@ -856,7 +933,8 @@ export function ReceiptReview() {
                   <Money pence={it.unitPrice * it.quantity} size={15.5} />
                   <AssignBadge
                     assignment={it.assignment}
-                    allMembers={members}
+                    roster={roster}
+                    activeMembers={members}
                   />
                 </div>
               </button>
@@ -907,7 +985,7 @@ export function ReceiptReview() {
             padding: "12px 16px 4px",
           }}
         >
-          {members.map((m) => (
+          {shareHolders.map((m) => (
             <div
               key={m.id}
               style={{
@@ -921,9 +999,15 @@ export function ReceiptReview() {
             >
               <Avatar name={m.name} color={m.color} size={36} />
               <span
-                style={{ fontSize: 11, fontWeight: 700, color: "var(--ink-3)" }}
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  color: "var(--ink-3)",
+                  whiteSpace: "nowrap",
+                }}
               >
                 {m.name}
+                {!m.active && " (left)"}
               </span>
               <Money pence={split.perPerson[m.id] ?? 0} size={13.5} />
             </div>

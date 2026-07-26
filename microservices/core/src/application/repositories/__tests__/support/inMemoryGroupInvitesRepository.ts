@@ -15,6 +15,7 @@ import type {
   GroupInvitesRepository,
 } from "../../groupInvitesRepository";
 import type { Group, InvitePreview, Member } from "../../../../domain/types";
+import { nextColourIndex } from "../../colourIndex";
 
 type MemberRec = {
   id: string;
@@ -23,6 +24,7 @@ type MemberRec = {
   userId: string | null;
   placeholder: boolean;
   active: boolean;
+  colourIndex: number;
 };
 
 type InviteRec = {
@@ -63,6 +65,7 @@ export class InMemoryGroupInvitesRepository {
       userId,
       placeholder: false,
       active: true,
+      colourIndex: this.nextColourSlot(groupId),
     });
     return id;
   }
@@ -78,6 +81,7 @@ export class InMemoryGroupInvitesRepository {
       userId: null,
       placeholder: true,
       active: true,
+      colourIndex: this.nextColourSlot(groupId),
     });
     return id;
   }
@@ -114,6 +118,15 @@ export class InMemoryGroupInvitesRepository {
 
   // ── internal helpers ────────────────────────────────────────────────────────
 
+  /**
+   * Next free palette slot. Delegates to the real `nextColourIndex` over the FULL
+   * roster, exactly as the real repositories do — modelling the rule a second
+   * time here is how the double and the server drift apart.
+   */
+  private nextColourSlot(groupId: string): number {
+    return nextColourIndex(this.membersOf(groupId).map((m) => m.colourIndex));
+  }
+
   private membersOf(groupId: string): MemberRec[] {
     return [...this.members.values()].filter((m) => m.groupId === groupId);
   }
@@ -128,14 +141,19 @@ export class InMemoryGroupInvitesRepository {
       id: groupId,
       name: g?.name ?? "Test Group",
       createdAt: new Date(0).toISOString(),
-      members: this.membersOf(groupId)
-        .filter((m) => m.active)
-        .map((m) => this.toMember(m)),
+      // Former members included, flagged — mirrors the real `buildGroup`.
+      members: this.membersOf(groupId).map((m) => this.toMember(m)),
     };
   }
 
   private toMember(m: MemberRec): Member {
-    return { id: m.id, groupId: m.groupId, name: m.name };
+    return {
+      id: m.id,
+      groupId: m.groupId,
+      name: m.name,
+      active: m.active,
+      colourIndex: m.colourIndex,
+    };
   }
 
   // ── public surface (mirrors the real repository) ────────────────────────────
@@ -246,6 +264,7 @@ export class InMemoryGroupInvitesRepository {
       userId,
       placeholder: false,
       active: true,
+      colourIndex: this.nextColourSlot(invite.groupId),
     };
     this.members.set(id, member);
     // Open invite: intentionally NOT marked used — stays reusable.

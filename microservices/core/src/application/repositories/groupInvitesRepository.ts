@@ -1,4 +1,4 @@
-import { and, asc, eq, isNull } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import {
   getDb,
   groupInvites,
@@ -7,7 +7,6 @@ import {
   users,
   type Db,
   type GroupInviteRow,
-  type GroupMemberRow,
   type GroupRow,
 } from "@divvy-up/db";
 import type {
@@ -19,6 +18,7 @@ import type {
 import { isActiveMember } from "./membership";
 import { isUuid } from "./isUuid";
 import { nextColourIndex } from "./colourIndex";
+import { hydrateRoster, toMember } from "./roster";
 import { generateInviteToken, hashInviteToken } from "./inviteToken";
 import { activityText, recordActivity } from "./activityRepository";
 
@@ -82,30 +82,19 @@ function toInvite(row: GroupInviteRow): GroupInvite {
   };
 }
 
-function toMember(row: GroupMemberRow): Member {
-  return { id: row.id, groupId: row.groupId, name: row.name };
-}
-
 /** Anything with `.select` — the singleton `Db` and a `Db` transaction both qualify. */
 type Executor = Pick<Db, "select">;
 
-/** Loads a group with its active members (newest-membership-last), for a success payload. */
+/** Loads a group with its full roster, for a success payload. */
 async function buildGroup(
   executor: Executor,
   groupRow: GroupRow,
 ): Promise<Group> {
-  const memberRows = await executor
-    .select()
-    .from(groupMembers)
-    .where(
-      and(eq(groupMembers.groupId, groupRow.id), eq(groupMembers.active, true)),
-    )
-    .orderBy(asc(groupMembers.createdAt));
   return {
     id: groupRow.id,
     name: groupRow.name,
     createdAt: groupRow.createdAt.toISOString(),
-    members: memberRows.map(toMember),
+    members: await hydrateRoster(executor, groupRow.id),
   };
 }
 
@@ -320,18 +309,14 @@ export class GroupInvitesRepository {
         .where(eq(users.id, userId));
       const name = user?.displayName || user?.email.split("@")[0] || "Member";
 
-      const activeMembers = await tx
+      // Full roster, removed members included — see `GroupsRepository.addMember`:
+      // former members are still rendered, so reusing their slot would paint two
+      // people the same colour.
+      const roster = await tx
         .select({ colourIndex: groupMembers.colourIndex })
         .from(groupMembers)
-        .where(
-          and(
-            eq(groupMembers.groupId, invite.groupId),
-            eq(groupMembers.active, true),
-          ),
-        );
-      const colourIndex = nextColourIndex(
-        activeMembers.map((m) => m.colourIndex),
-      );
+        .where(eq(groupMembers.groupId, invite.groupId));
+      const colourIndex = nextColourIndex(roster.map((m) => m.colourIndex));
 
       const inserted = await tx
         .insert(groupMembers)

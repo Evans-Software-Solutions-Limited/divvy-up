@@ -21,6 +21,23 @@ export type Member = {
   id: MemberId;
   groupId: GroupId;
   name: string;
+  /**
+   * False for a member who has been removed from the group (`group_members`
+   * soft-delete). Former members are still returned, because a finalized
+   * expense pins its participants: someone removed afterwards keeps owing
+   * their frozen share, and the UI has to be able to name them. Anything that
+   * OFFERS members as a choice — payer pickers, assignment editors, `everyone`
+   * splits — must filter on this, because the write paths reject inactive
+   * members.
+   */
+  active: boolean;
+  /**
+   * The member's slot in the avatar palette, assigned server-side. Callers must
+   * colour by this rather than by array position: former members occupy a
+   * position in the list, so index-derived colours would shift for everyone
+   * after them.
+   */
+  colourIndex: number;
   /** Placeholder for future auth user linkage */
   userId?: string;
 };
