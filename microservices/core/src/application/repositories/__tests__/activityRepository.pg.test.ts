@@ -198,6 +198,333 @@ describe("recordActivity + ActivityRepository (PGlite, real schema)", () => {
     expect(rows[0].kind).toBe("expense_added");
   });
 
+  // ─── editing a finalized expense ────────────────────────────────────────────
+  //
+  // Assignment edits stay open after finalizing — there is no delete or
+  // un-finalize endpoint, so it's the only way to fix a mis-assigned receipt. But
+  // the expense is already counting toward balances, so an edit moves money
+  // between members and must not be silent.
+
+  it("writes an `expense_split_changed` row when a FINALIZED expense's split is edited", async () => {
+    const { user, group, alice, bob } = await seedGroupWithMembers();
+    const expenses = new ExpensesRepository(db);
+
+    const expense = await expenses.create(user.id, {
+      groupId: group.id,
+      payerId: alice.id,
+      description: "Dinner",
+      date: "2026-03-26",
+      currency: "GBP",
+      items: [
+        {
+          description: "Bottle of red",
+          unitPrice: 2000,
+          quantity: 1,
+          assignment: { type: "one", memberId: alice.id },
+        },
+      ],
+    });
+    await expenses.finalize(user.id, expense.id);
+
+    // The wine was actually Bob's — correcting it after finalizing moves £20 of
+    // debt from Alice to Bob.
+    await expenses.updateItemAssignment(
+      user.id,
+      expense.id,
+      expense.items[0].id,
+      { type: "one", memberId: bob.id },
+    );
+
+    // `activityRows` has no ORDER BY, so match by kind rather than position.
+    const rows = await activityRows(group.id);
+    expect(rows.map((r) => r.kind).sort()).toEqual([
+      "expense_added",
+      "expense_split_changed",
+    ]);
+    const edit = rows.find((r) => r.kind === "expense_split_changed");
+    expect(edit).toMatchObject({
+      expenseId: expense.id,
+      settlementId: null,
+      // The item's value — what was at stake in the re-split, not a transfer.
+      amount: 2000,
+    });
+    // Both sides named, so a reader can tell whether a settlement recorded
+    // against the old split still corresponds to a debt.
+    expect(edit?.text).toBe(
+      "Caller re-split Bottle of red on Dinner — was Alice, now Bob",
+    );
+  });
+
+  it("names an equal-split re-assignment on both sides", async () => {
+    const { user, group, caller, alice, bob } = await seedGroupWithMembers();
+    const expenses = new ExpensesRepository(db);
+
+    const expense = await expenses.create(user.id, {
+      groupId: group.id,
+      payerId: alice.id,
+      description: "Dinner",
+      date: "2026-03-26",
+      currency: "GBP",
+      items: [
+        {
+          description: "Sharing platter",
+          unitPrice: 1500,
+          quantity: 1,
+          assignment: { type: "equal", memberIds: [alice.id, bob.id] },
+        },
+      ],
+    });
+    await expenses.finalize(user.id, expense.id);
+
+    await expenses.updateItemAssignment(
+      user.id,
+      expense.id,
+      expense.items[0].id,
+      { type: "equal", memberIds: [caller.id, alice.id] },
+    );
+
+    const edit = (await activityRows(group.id)).find(
+      (r) => r.kind === "expense_split_changed",
+    );
+    expect(edit?.text).toBe(
+      "Caller re-split Sharing platter on Dinner — was Alice, Bob, now Alice, Caller",
+    );
+  });
+
+  it("records the proportions when a re-split moves money between the same people", async () => {
+    // The case a name-only audit line can't express: same two members, £9 of £10
+    // moving between them. "was Alice, Bob, now Alice, Bob" would assert that
+    // nothing happened, so the weights are part of the text.
+    const { user, group, alice, bob } = await seedGroupWithMembers();
+    const expenses = new ExpensesRepository(db);
+
+    const expense = await expenses.create(user.id, {
+      groupId: group.id,
+      payerId: alice.id,
+      description: "Dinner",
+      date: "2026-03-26",
+      currency: "GBP",
+      items: [
+        {
+          description: "Bottle of red",
+          unitPrice: 1000,
+          quantity: 1,
+          assignment: { type: "equal", memberIds: [alice.id, bob.id] },
+        },
+      ],
+    });
+    await expenses.finalize(user.id, expense.id);
+
+    await expenses.updateItemAssignment(
+      user.id,
+      expense.id,
+      expense.items[0].id,
+      {
+        type: "custom",
+        shares: [
+          { memberId: alice.id, fraction: 0.9 },
+          { memberId: bob.id, fraction: 0.1 },
+        ],
+      },
+    );
+
+    const edit = (await activityRows(group.id)).find(
+      (r) => r.kind === "expense_split_changed",
+    );
+    expect(edit).toBeDefined();
+    // Weights shown for the `custom` side; the `equal` side needs none.
+    expect(edit?.text).toContain("was Alice, Bob, now ");
+    expect(edit?.text).toContain("×9");
+    expect(edit?.text).toContain("×1");
+    expect(edit?.text).not.toBe(
+      "Caller re-split Bottle of red on Dinner — was Alice, Bob, now Alice, Bob",
+    );
+  });
+
+  it("writes NO row when a mode change re-spells the same split", async () => {
+    // `equal` over [A,B] and `custom` 0.5/0.5 over [A,B] are the same pennies.
+    // Re-labelling one as the other moved nothing, so it must not claim it did.
+    const { user, group, alice, bob } = await seedGroupWithMembers();
+    const expenses = new ExpensesRepository(db);
+
+    const expense = await expenses.create(user.id, {
+      groupId: group.id,
+      payerId: alice.id,
+      description: "Dinner",
+      date: "2026-03-26",
+      currency: "GBP",
+      items: [
+        {
+          description: "Main",
+          unitPrice: 1000,
+          quantity: 1,
+          assignment: { type: "equal", memberIds: [alice.id, bob.id] },
+        },
+      ],
+    });
+    await expenses.finalize(user.id, expense.id);
+
+    await expenses.updateItemAssignment(
+      user.id,
+      expense.id,
+      expense.items[0].id,
+      {
+        type: "custom",
+        shares: [
+          { memberId: alice.id, fraction: 0.5 },
+          { memberId: bob.id, fraction: 0.5 },
+        ],
+      },
+    );
+
+    expect((await activityRows(group.id)).map((r) => r.kind)).toEqual([
+      "expense_added",
+    ]);
+  });
+
+  it("writes NO row when a DRAFT's split is edited", async () => {
+    const { user, group, alice, bob } = await seedGroupWithMembers();
+    const expenses = new ExpensesRepository(db);
+
+    const expense = await expenses.create(user.id, {
+      groupId: group.id,
+      payerId: alice.id,
+      description: "Dinner",
+      date: "2026-03-26",
+      currency: "GBP",
+      items: [
+        {
+          description: "Main",
+          unitPrice: 1000,
+          quantity: 1,
+          assignment: { type: "one", memberId: alice.id },
+        },
+      ],
+    });
+
+    // Assigning items IS the draft workflow — a feed row per tap would bury
+    // everything else.
+    await expenses.updateItemAssignment(
+      user.id,
+      expense.id,
+      expense.items[0].id,
+      { type: "one", memberId: bob.id },
+    );
+
+    expect(await activityRows(group.id)).toHaveLength(0);
+  });
+
+  it("writes a row when assigning `everyone` to a finalized item widens the split", async () => {
+    // The one path where what gets WRITTEN differs from what was requested:
+    // `everyone` on a finalized expense is frozen into an explicit `equal` set.
+    // The comparison must be against the frozen set, not the (empty) requested
+    // rows — otherwise every `everyone` request looks like a change.
+    const { user, group, alice, bob } = await seedGroupWithMembers();
+    const expenses = new ExpensesRepository(db);
+
+    const expense = await expenses.create(user.id, {
+      groupId: group.id,
+      payerId: alice.id,
+      description: "Dinner",
+      date: "2026-03-26",
+      currency: "GBP",
+      items: [
+        {
+          description: "Garlic bread",
+          unitPrice: 600,
+          quantity: 1,
+          assignment: { type: "equal", memberIds: [alice.id, bob.id] },
+        },
+      ],
+    });
+    await expenses.finalize(user.id, expense.id);
+
+    // Freezes over all three active members (Caller, Alice, Bob) — genuinely
+    // wider than the [Alice, Bob] it had, so it moved money.
+    await expenses.updateItemAssignment(
+      user.id,
+      expense.id,
+      expense.items[0].id,
+      { type: "everyone" },
+    );
+
+    const rows = await activityRows(group.id);
+    const edit = rows.find((r) => r.kind === "expense_split_changed");
+    expect(edit).toBeDefined();
+    expect(edit?.text).toContain("was Alice, Bob, now ");
+  });
+
+  it("writes NO row when `everyone` freezes to exactly the split already stored", async () => {
+    // Same request, but the frozen set equals what's already there, so no money
+    // moved and there is nothing to report.
+    const { user, group, caller, alice, bob } = await seedGroupWithMembers();
+    const expenses = new ExpensesRepository(db);
+
+    const expense = await expenses.create(user.id, {
+      groupId: group.id,
+      payerId: alice.id,
+      description: "Dinner",
+      date: "2026-03-26",
+      currency: "GBP",
+      items: [
+        {
+          description: "Garlic bread",
+          unitPrice: 600,
+          quantity: 1,
+          assignment: {
+            type: "equal",
+            memberIds: [caller.id, alice.id, bob.id], // every active member
+          },
+        },
+      ],
+    });
+    await expenses.finalize(user.id, expense.id);
+
+    await expenses.updateItemAssignment(
+      user.id,
+      expense.id,
+      expense.items[0].id,
+      { type: "everyone" },
+    );
+
+    const rows = await activityRows(group.id);
+    expect(rows.map((r) => r.kind)).toEqual(["expense_added"]);
+  });
+
+  it("writes NO row when a finalized item is re-saved without changing the split", async () => {
+    const { user, group, alice } = await seedGroupWithMembers();
+    const expenses = new ExpensesRepository(db);
+
+    const expense = await expenses.create(user.id, {
+      groupId: group.id,
+      payerId: alice.id,
+      description: "Dinner",
+      date: "2026-03-26",
+      currency: "GBP",
+      items: [
+        {
+          description: "Main",
+          unitPrice: 1000,
+          quantity: 1,
+          assignment: { type: "equal", memberIds: [alice.id] },
+        },
+      ],
+    });
+    await expenses.finalize(user.id, expense.id);
+
+    // Opening the editor on a finalized item and pressing save without touching
+    // anything moved no money, so it must not claim it did.
+    await expenses.updateItemAssignment(
+      user.id,
+      expense.id,
+      expense.items[0].id,
+      { type: "equal", memberIds: [alice.id] },
+    );
+
+    const rows = await activityRows(group.id);
+    expect(rows.map((r) => r.kind)).toEqual(["expense_added"]);
+  });
+
   it("writes a `settled_up` row atomically when a settlement is recorded", async () => {
     const { user, group, alice, bob } = await seedGroupWithMembers();
     const settlements = new SettlementsRepository(db);

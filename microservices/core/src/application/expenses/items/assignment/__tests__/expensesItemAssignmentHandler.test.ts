@@ -136,6 +136,44 @@ describe("PUT /expenses/:id/items/:itemId/assignment", () => {
     expect(updated?.assignment.shares).toHaveLength(2);
   });
 
+  it("still accepts an edit after the expense is finalized", async () => {
+    // Deliberate contract: finalizing means "this counts toward balances", not
+    // "frozen forever". There is no delete-expense and no un-finalize endpoint,
+    // so refusing here would leave a mis-assigned receipt wrong permanently. The
+    // edit is instead recorded — an `expense_split_changed` activity row, proven
+    // atomically in activityRepository.pg.test.ts (the in-memory double models
+    // only the read path of the feed).
+    expensesRepo._setGroupMemberIds("group-1", ["member-1", "member-2"]);
+    const expense = await expensesRepo.create(TEST_USER_ID, baseExpenseInput);
+    const itemId = expense.items[0].id;
+    const finalized = await expensesRepo.finalize(TEST_USER_ID, expense.id);
+    expect(finalized?.status).toBe("finalized");
+
+    const response = await expensesItemAssignmentHandler.handle(
+      new Request(
+        `http://localhost/expenses/${expense.id}/items/${itemId}/assignment`,
+        {
+          method: "PUT",
+          headers: { "Content-Type": "application/json", ...authHeaders() },
+          body: JSON.stringify({
+            assignment: { type: "one", memberId: "member-2" },
+          }),
+        },
+      ),
+    );
+
+    expect(response.status).toBe(200);
+    const data = (await response.json()) as {
+      status: string;
+      items: { id: string; assignment: { type: string; memberId?: string } }[];
+    };
+    expect(data.status).toBe("finalized"); // still finalized — the edit doesn't reopen it
+    expect(data.items.find((i) => i.id === itemId)?.assignment).toEqual({
+      type: "one",
+      memberId: "member-2",
+    });
+  });
+
   it("returns 404 when the expense does not exist", async () => {
     const response = await expensesItemAssignmentHandler.handle(
       new Request(

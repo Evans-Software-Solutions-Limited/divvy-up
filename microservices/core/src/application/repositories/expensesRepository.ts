@@ -224,6 +224,92 @@ function groupBy<T, K>(items: T[], key: (item: T) => K): Map<K, T[]> {
 type SelectCapable = Pick<Db, "select">;
 
 /**
+ * Did an item's split actually change **in a way that moves money**? Compares the
+ * stored participant rows with what is about to be written.
+ *
+ * Used to keep a no-op re-save — opening the editor on a finalized item and
+ * pressing save without touching anything — from manufacturing a feed row that
+ * claims money moved when it didn't.
+ *
+ * What's compared, and why that's the whole of it:
+ * - **Not row order.** Each row is self-contained (member + weight) and the split
+ *   math is order-independent, so a set comparison is the right shape. (The rows
+ *   are still read in `assignmentRowOrder`, because the same rows get rendered
+ *   into the audit text, where order does show.)
+ * - **Not the mode.** What the mode does is determine the weights, and the
+ *   weights are compared directly: `null` (as `one`/`equal` store it) means
+ *   weight 1, which is why it's normalised to `1` in the key. So an `equal` split
+ *   over [A,B] and a `custom` split of 0.5/0.5 over [A,B] compare EQUAL — they
+ *   are the same pennies, and re-labelling them moved nothing. Likewise
+ *   `one` over [A] and `equal` over [A].
+ * - Duplicate members can't occur: `item_assignments` has a unique index on
+ *   (item_id, member_id), so equal length plus subset implies set equality.
+ */
+function splitChanged(
+  previousRows: AssignmentRow[],
+  next: ParsedAssignment,
+): boolean {
+  if (previousRows.length !== next.rows.length) return true;
+  // `?? 1`, not `?? ""`: a null weight IS weight 1, so modes that differ only in
+  // how they spell an even split aren't reported as a money movement.
+  const key = (r: AssignmentRow) => `${r.memberId}:${r.shareWeight ?? 1}`;
+  const before = new Set(previousRows.map(key));
+  return next.rows.some((r) => !before.has(key(r)));
+}
+
+/**
+ * Human-readable "who was on this item, and in what proportion", for the audit
+ * text. Names are resolved by the caller inside its transaction and snapshotted
+ * into the feed row, so the entry still reads correctly after a rename or a
+ * removal. (A removed member still resolves: removal is a soft delete, and the FKs
+ * are `restrict`, so the fallback string is effectively unreachable.)
+ *
+ * Two things this must NOT do, because the row's whole job is to let someone
+ * reconcile a changed debt:
+ * - **Drop the weights.** A `custom` re-split can keep the same people and move
+ *   money between them (0.5/0.5 → 0.9/0.1), which would otherwise render an
+ *   identical "was" and "now" while £9 of £10 moved.
+ * - **Truncate the list.** Two different 5-way splits that share their first two
+ *   members would both render "Alice, Bob +3 more". Splits are bounded by group
+ *   size in practice, so every name is listed.
+ *
+ * Rendered in NAME order, not row order. Row order is member-id order, and member
+ * ids are random uuids — fine for the split maths (where it only needs to be
+ * stable) but arbitrary in prose. Sorting by name makes "was …, now …" line up
+ * for a human comparing the two, and makes the text reproducible.
+ */
+function describeParticipants(
+  mode: AssignmentModeValue | null,
+  rows: AssignmentRow[],
+  names: Map<string, string>,
+): string {
+  if (mode === null) return "unassigned";
+  if (mode === "everyone") return "everyone";
+  if (rows.length === 0) return "nobody";
+  return (
+    rows
+      .map((r) => ({
+        memberId: r.memberId,
+        name: names.get(r.memberId) ?? "a removed member",
+        // Weights only mean anything for `custom`; the others are all-equal shares.
+        weight: mode === "custom" ? r.shareWeight : null,
+      }))
+      // Names aren't unique (two Sams, or a placeholder mirroring a real member's
+      // name), so tie-break on member id — otherwise the two sides fall back to
+      // their own input orders and the line implies a swap that didn't happen.
+      // Locale pinned: bare `localeCompare` follows the runtime's locale and ICU
+      // build, so a non-ASCII name could order differently in CI than locally.
+      .sort(
+        (a, b) =>
+          a.name.localeCompare(b.name, "en") ||
+          a.memberId.localeCompare(b.memberId),
+      )
+      .map((e) => (e.weight === null ? e.name : `${e.name} ×${e.weight}`))
+      .join(", ")
+  );
+}
+
+/**
  * The order every read of `item_assignments` uses: by MEMBER id.
  *
  * Row order is not cosmetic: `computeBalances` feeds the member list straight
@@ -283,6 +369,20 @@ export class ExpensesRepository {
       )
       .orderBy(asc(groupMembers.id));
     return rows.map((r) => r.id);
+  }
+
+  /** Display names for the given member ids, for snapshotting into feed text. */
+  private async memberNames(
+    executor: SelectCapable,
+    memberIds: string[],
+  ): Promise<Map<string, string>> {
+    const unique = [...new Set(memberIds)];
+    if (unique.length === 0) return new Map();
+    const rows = await executor
+      .select({ id: groupMembers.id, name: groupMembers.name })
+      .from(groupMembers)
+      .where(inArray(groupMembers.id, unique));
+    return new Map(rows.map((r) => [r.id, r.name]));
   }
 
   /**
@@ -543,7 +643,31 @@ export class ExpensesRepository {
     });
   }
 
-  /** Returns null unless `userId` is a member of the expense's group (Req 7.3/7.4). */
+  /**
+   * Re-assigns one item. Returns null unless `userId` is a member of the
+   * expense's group (Req 7.3/7.4).
+   *
+   * ── Editing a FINALIZED expense is allowed, and logged ──────────────────────
+   * Finalizing means "this expense now counts toward balances", NOT "this expense
+   * is frozen forever". Assignment edits stay open afterwards because they are
+   * the only way to fix a mis-assigned receipt: there is no delete-expense and no
+   * un-finalize endpoint, so rejecting the edit would leave a wrong split wrong
+   * permanently, and the only workaround — a compensating expense or settlement —
+   * misstates what actually happened.
+   *
+   * The real defect was that such an edit was *silent*: it rewrote who owes whom
+   * on an expense that may already have settlements recorded against it, with
+   * nothing in the feed. So an edit to a finalized expense now emits
+   * `expense_split_changed`, in this same transaction, whenever the split
+   * materially changes. Draft edits emit nothing — assigning items is the normal
+   * draft workflow.
+   *
+   * What finalizing DOES freeze is the participant set of an `everyone` split
+   * (see `freezeEveryoneItems`): that's about balances drifting on their own as
+   * membership changes, which is a different thing from a person deliberately
+   * correcting a split. An `everyone` assignment made here on a finalized expense
+   * is therefore materialised on the spot rather than rejected.
+   */
   async updateItemAssignment(
     userId: string,
     expenseId: string,
@@ -572,7 +696,14 @@ export class ExpensesRepository {
         .where(eq(expenses.id, expenseId))
         .for("no key update");
       if (!expenseRow) return null;
-      if (!(await isActiveMember(tx, userId, expenseRow.groupId))) return null;
+      // Resolved once, up front, and used both as the membership gate and as the
+      // author of the audit row below — `resolveActorMember` runs exactly the
+      // `isActiveMember` predicate. Resolving it after the writes instead would
+      // leave a window (READ COMMITTED, and only the `expenses` row is locked)
+      // where the acting member is deactivated mid-transaction, the emit is
+      // skipped for want of an actor, and the rewrite commits unlogged.
+      const actor = await resolveActorMember(tx, userId, expenseRow.groupId);
+      if (!actor) return null;
 
       const [itemRow] = await tx
         .select()
@@ -585,13 +716,30 @@ export class ExpensesRepository {
         );
       if (!itemRow) return null;
 
+      const wasFinalized = expenseRow.status === "finalized";
+
       // Assigning `everyone` on an ALREADY-FINALIZED expense freezes on the
       // spot, for the same reason `finalize` does: a finalized expense must
       // never be left carrying a membership-dependent split, or its balances
-      // start drifting again. (Whether a finalized expense should be editable
-      // at all is a separate immutability question, untouched here.)
-      const freezeNow =
-        parsed.mode === "everyone" && expenseRow.status === "finalized";
+      // start drifting again.
+      const freezeNow = parsed.mode === "everyone" && wasFinalized;
+
+      // The split as it stands, captured BEFORE the rewrite below, so a
+      // no-op re-save of a finalized item doesn't manufacture a feed row.
+      const previousRows = wasFinalized
+        ? await tx
+            .select({
+              memberId: itemAssignments.memberId,
+              shareWeight: itemAssignments.shareWeight,
+            })
+            .from(itemAssignments)
+            .where(eq(itemAssignments.itemId, itemId))
+            // Ordered, because these rows don't only feed the set comparison —
+            // they're also rendered into the audit text, where physical row order
+            // would otherwise decide the name sequence. Ordering both sides the
+            // same way makes "was X, now Y" comparable at a glance.
+            .orderBy(assignmentRowOrder)
+        : [];
 
       // What actually gets written: `parsed`, except a finalized `everyone`
       // becomes the frozen `equal` set.
@@ -641,6 +789,44 @@ export class ExpensesRepository {
         .update(expenses)
         .set({ updatedAt: new Date() })
         .where(eq(expenses.id, expenseId));
+
+      // Editing a FINALIZED expense rewrites who owes whom — the expense is
+      // already counting toward balances, and a settlement may already have been
+      // recorded against the old numbers. That's allowed (see the method doc:
+      // it's the only way to fix a mis-assigned receipt) but it gets a feed row,
+      // emitted in this same transaction so a committed edit always has its
+      // audit trail. Draft edits emit nothing: assigning items is the normal
+      // draft workflow and would bury the feed.
+      if (wasFinalized && splitChanged(previousRows, effective)) {
+        // Name both sides of the move. Without them the row says only "something
+        // changed", which is not enough to tell whether a settlement already
+        // recorded against the old split still corresponds to a debt — the very
+        // reconciliation this row exists for.
+        const names = await this.memberNames(tx, [
+          ...previousRows.map((r) => r.memberId),
+          ...effective.rows.map((r) => r.memberId),
+        ]);
+        await recordActivity(tx, {
+          groupId: expenseRow.groupId,
+          actorMemberId: actor.id,
+          kind: "expense_split_changed",
+          text: activityText.expenseSplitChanged(actor.name, {
+            item: itemRow.description,
+            expense: expenseRow.description,
+            before: describeParticipants(
+              itemRow.assignmentMode,
+              previousRows,
+              names,
+            ),
+            after: describeParticipants(effective.mode, effective.rows, names),
+          }),
+          // The item's own value — what was at stake in this re-split, NOT a
+          // transfer. `amount` is display metadata throughout the feed and never
+          // an input to balance math.
+          amount: itemRow.unitPrice * itemRow.quantity,
+          expenseId,
+        });
+      }
 
       return this.hydrateExpense(tx, expenseId);
     });

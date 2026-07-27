@@ -29,6 +29,13 @@
       "when": 1784017956694,
       "tag": "0003_freeze_finalized_everyone_splits",
       "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1785103106594,
+      "tag": "0004_activity_expense_split_changed",
+      "breakpoints": true
     }
   ]
 }
