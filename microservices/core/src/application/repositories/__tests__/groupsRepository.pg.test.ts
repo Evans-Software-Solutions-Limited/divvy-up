@@ -219,4 +219,25 @@ describe("GroupsRepository (PGlite)", () => {
     expect(byId.get(second!.id)?.placeholder).toBe(true);
     expect(byId.get(third!.id)?.placeholder).toBe(true);
   });
+
+  it("addMember() does not reuse a removed member's colour slot", async () => {
+    // Slots are minted against the full roster, not just active members. Reusing
+    // a departed member's slot would paint them and the newcomer identically —
+    // both are rendered, since former members stay in the group payload. (The
+    // invite flow also reactivates a removed member WITHOUT re-minting their
+    // slot, so an active-only mint can collide two *current* members.)
+    const user = await seedUser(db);
+    const repo = new GroupsRepository(db);
+    const group = await repo.create(user.id, "Test Group"); // creator takes slot 0
+
+    const departing = await repo.addMember(user.id, group.id, "Departing");
+    expect(departing?.colourIndex).toBe(1);
+    await db
+      .update(groupMembers)
+      .set({ active: false })
+      .where(eq(groupMembers.id, departing!.id));
+
+    const joiner = await repo.addMember(user.id, group.id, "Joiner");
+    expect(joiner?.colourIndex).toBe(2);
+  });
 });

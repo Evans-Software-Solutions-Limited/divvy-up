@@ -99,13 +99,14 @@ describe("ReceiptReview — members who have left the group", () => {
     expect(screen.queryByText("£3.00")).toBeNull();
   });
 
-  it("keeps a former member out of the per-person split entirely", () => {
+  it("keeps a former member out of an `everyone` split", () => {
     mockData([ALICE, BOB, CARA_FORMER]);
 
     renderReview();
 
-    // The live split bar lists one column per assignable member. Cara has left,
-    // so she gets no column at all — not a £0.00 one.
+    // An `everyone` split resolves over current members only, so Cara holds no
+    // share of this item and gets no column — not a £0.00 one. (A former member
+    // who DOES hold a share is a different case: see the next test.)
     expect(screen.getByText("Alice")).toBeDefined();
     expect(screen.getByText("Bob")).toBeDefined();
     expect(screen.queryByText("Cara")).toBeNull();
