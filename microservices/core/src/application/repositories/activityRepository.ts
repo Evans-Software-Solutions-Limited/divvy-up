@@ -60,6 +60,26 @@ export const activityText = {
   /** e.g. "Alex finalized Dinner — £48.00" */
   expenseAdded: (actorName: string, description: string, totalPence: number) =>
     `${actorName} finalized ${description} — ${gbp(totalPence)}`,
+  /**
+   * A split changed after finalizing, e.g. "Alex re-split Bottle of red on
+   * Dinner — was Sam, now Jordan".
+   *
+   * Names both sides deliberately: the row's job is to let someone reconcile a
+   * changed debt (possibly against a settlement already recorded on the old
+   * split), and "something changed" doesn't support that. `before`/`after` come
+   * from `describeParticipants`, which renders `unassigned` / `everyone` /
+   * a name list.
+   */
+  expenseSplitChanged: (
+    actorName: string,
+    parts: {
+      item: string;
+      expense: string;
+      before: string;
+      after: string;
+    },
+  ) =>
+    `${actorName} re-split ${parts.item} on ${parts.expense} — was ${parts.before}, now ${parts.after}`,
   /** e.g. "Sam paid Alex £12.00" */
   settledUp: (fromName: string, toName: string, amountPence: number) =>
     `${fromName} paid ${toName} ${gbp(amountPence)}`,

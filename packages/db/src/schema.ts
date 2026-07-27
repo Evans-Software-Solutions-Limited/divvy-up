@@ -37,6 +37,11 @@ export const adjustmentKind = pgEnum("adjustment_kind", [
 
 export const activityKind = pgEnum("activity_kind", [
   "expense_added", // emitted when an expense is finalized (becomes part of balances)
+  // An item's split was changed on an ALREADY-FINALIZED expense, i.e. after it
+  // started counting toward balances. Editing one rewrites who owes whom, so the
+  // change is logged rather than applied silently. Draft edits emit nothing —
+  // assigning items is the normal draft workflow and would flood the feed.
+  "expense_split_changed",
   "settled_up",
   "member_added",
 ]);

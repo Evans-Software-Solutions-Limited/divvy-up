@@ -750,6 +750,57 @@ describe("ExpensesRepository (PGlite)", () => {
     expect(draftItem.assignmentMode).toBe("everyone");
   });
 
+  it("a finalized expense's split can be corrected, and the balances follow", async () => {
+    // The contract: finalizing means "counts toward balances", not "frozen".
+    // Correcting a mis-assigned item is the only route available (no delete, no
+    // un-finalize), so it works — and the resulting debt moves with it.
+    const { group, members, user } = await seedGroupWithMembers(["A", "B"]);
+    const repo = new ExpensesRepository(db);
+    const [payer, other] = members;
+
+    const draft = await repo.create(
+      user.id,
+      baseInput(group.id, payer.id, [
+        {
+          description: "Bottle of red",
+          unitPrice: 2000,
+          quantity: 1,
+          assignment: { type: "one", memberId: payer.id },
+        },
+      ]),
+    );
+    await repo.finalize(user.id, draft.id);
+
+    const balancesNow = async () =>
+      computeGroupBalances(
+        group.id,
+        (await repo.listByGroup(user.id, group.id)).filter(
+          (e) => e.status === "finalized",
+        ),
+        [],
+      );
+
+    // Assigned to the payer, so nobody owes anything.
+    expect(await balancesNow()).toEqual([]);
+
+    const corrected = await repo.updateItemAssignment(
+      user.id,
+      draft.id,
+      draft.items[0].id,
+      { type: "one", memberId: other.id },
+    );
+    expect(corrected?.status).toBe("finalized"); // the edit doesn't reopen it
+
+    expect(await balancesNow()).toEqual([
+      {
+        groupId: group.id,
+        fromMemberId: other.id,
+        toMemberId: payer.id,
+        amount: 2000,
+      },
+    ]);
+  });
+
   it("updateItemAssignment() freezes 'everyone' when the expense is already finalized", async () => {
     const { group, members, user } = await seedGroupWithMembers(["A", "B"]);
     const repo = new ExpensesRepository(db);

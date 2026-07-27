@@ -1,0 +1,18 @@
+-- New activity kind: an item's split was changed on an already-FINALIZED expense.
+-- Editing one rewrites who owes whom after the expense started counting toward
+-- balances, so it gets a feed row instead of happening silently. Draft edits emit
+-- nothing — assigning items is the normal draft workflow.
+--
+-- NOTE for whoever adds the next migration: drizzle runs all pending migrations in
+-- ONE transaction, and Postgres forbids *using* a newly added enum value in the
+-- same transaction that added it. So a later migration that writes
+-- 'expense_split_changed' (a backfill, a CHECK, a partial index) must be applied
+-- in a separate batch, or it fails on an existing database with
+-- "unsafe use of new value ... of enum type activity_kind".
+--
+-- MIGRATE BEFORE DEPLOYING: the emit shares a transaction with the assignment
+-- write, so code running against a database without this value fails the insert
+-- and aborts the whole edit — correcting a mis-assigned finalized receipt would
+-- 500 until this lands. Fail-closed, which is the right direction, but it means
+-- the edit is unavailable rather than merely unlogged.
+ALTER TYPE "public"."activity_kind" ADD VALUE 'expense_split_changed' BEFORE 'settled_up';

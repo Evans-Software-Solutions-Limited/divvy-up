@@ -109,9 +109,20 @@ for the client:
 Assignment edits are **not** blocked after finalizing — it's the only way to fix a
 mis-assigned receipt (there is no delete or un-finalize endpoint). But an edit
 rewrites who owes whom on an expense that already counts toward balances, so the
-server emits an `expense_split_changed` activity row. The mobile UI should make
-that consequence visible before the user saves — the web editor shows a warning
-when the expense is finalized and when saving will drop a departed member's share.
+server emits an `expense_split_changed` activity row naming both sides of the move
+("… — was Sam, now Jordan") with the item's value as `amount`.
+
+**Requirement for mobile, with no web precedent to copy:** warn before saving a
+re-split of a **finalized** expense. The web editor does _not_ do this — it only
+disables the finalize button once finalized. Don't go looking for a reference
+implementation of it: there isn't one.
+
+What web _does_ have, and is worth mirroring, is the adjacent departed-member
+case: an amber notice in the item editor when saving would drop a member who has
+left, and a `(left)` suffix on their column in the split bar — see
+`ReceiptReview.tsx` (search for "has left the group. Saving", not for "warning";
+the strings don't use that word).
+
 Handle the new activity kind in the feed (the web feed has a `default` icon case,
 so an unhandled kind degrades rather than crashes).
 

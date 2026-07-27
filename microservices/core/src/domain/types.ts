@@ -176,7 +176,17 @@ export type Settlement = {
 
 // ─── Activity ─────────────────────────────────────────────────────────────────
 
-export type ActivityKind = "expense_added" | "settled_up" | "member_added";
+export type ActivityKind =
+  | "expense_added"
+  /**
+   * An item's split changed on an already-FINALIZED expense — i.e. after it began
+   * counting toward balances, so the change moved money between members. Editing
+   * a finalized expense is allowed (it's the only way to fix a mis-assigned
+   * receipt) but never silent. Draft edits emit nothing.
+   */
+  | "expense_split_changed"
+  | "settled_up"
+  | "member_added";
 
 /**
  * A single entry in a group's reverse-chronological activity feed. Feed rows are
@@ -195,12 +205,13 @@ export type Activity = {
   /** Server-composed, name-snapshotted summary — safe to render as-is. */
   text: string;
   /**
-   * Minor currency units (pence) for events that carry one (expense total,
-   * settlement amount); null for `member_added`. Display metadata only — never
-   * an input to balance math.
+   * Minor currency units (pence) for events that carry one: the expense total
+   * (`expense_added`), the settlement amount (`settled_up`), or the value of the
+   * item whose split changed (`expense_split_changed`). Null for `member_added`.
+   * Display metadata only — never an input to balance math.
    */
   amount: number | null;
-  /** Set for `expense_added`; null otherwise (and nulled if the expense is deleted). */
+  /** Set for `expense_added` and `expense_split_changed`; null otherwise (and nulled if the expense is deleted). */
   expenseId: ExpenseId | null;
   /** Set for `settled_up`; null otherwise (and nulled if the settlement is deleted). */
   settlementId: string | null;
