@@ -394,11 +394,25 @@ export function Home() {
         )}
 
         {groups?.map((g) => {
-          const members =
-            (g as { members: Array<{ name: string }> }).members ?? [];
+          // Current members only: the group payload also carries people who
+          // have been removed (flagged `active: false`) so their frozen debts
+          // can still be rendered elsewhere, but a group card should show who
+          // is in the group now — counting former members would inflate it.
+          // Colour comes from the server-assigned slot, not the array index.
+          const members = (
+            (
+              g as {
+                members: Array<{
+                  name: string;
+                  active?: boolean;
+                  colourIndex?: number;
+                }>;
+              }
+            ).members ?? []
+          ).filter((m) => m.active !== false);
           const memberObjs = members.map((m, i) => ({
             name: m.name,
-            color: memberColor(i),
+            color: memberColor(m.colourIndex ?? i),
           }));
           return (
             <button

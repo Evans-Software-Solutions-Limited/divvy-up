@@ -11,6 +11,7 @@
 // mirroring the real `GroupsRepository`'s `group_members` join.
 import type { GroupsRepository } from "../../groupsRepository";
 import type { Group, Member } from "../../../../domain/types";
+import { nextColourIndex } from "../../colourIndex";
 
 export class InMemoryGroupsRepository {
   static readonly key = "GroupsRepository";
@@ -19,7 +20,9 @@ export class InMemoryGroupsRepository {
 
   private isMember(userId: string, groupId: string): boolean {
     return (
-      this.store.get(groupId)?.members.some((m) => m.userId === userId) ?? false
+      this.store
+        .get(groupId)
+        ?.members.some((m) => m.userId === userId && m.active) ?? false
     );
   }
 
@@ -35,6 +38,8 @@ export class InMemoryGroupsRepository {
       groupId,
       name: "Creator",
       userId,
+      active: true,
+      colourIndex: 0,
     };
     const group: Group = {
       id: groupId,
@@ -63,9 +68,23 @@ export class InMemoryGroupsRepository {
       id: crypto.randomUUID(),
       groupId,
       name,
+      active: true,
+      // Delegates to the real helper over the full roster, as the real repo does.
+      colourIndex: nextColourIndex(group.members.map((m) => m.colourIndex)),
     };
     group.members.push(member);
     return member;
+  }
+
+  /**
+   * Test-only: soft-delete a member (models removal). The member stays in the
+   * group payload flagged `active: false`, as the real repository returns it.
+   */
+  _deactivateMember(groupId: string, memberId: string): void {
+    const member = this.store
+      .get(groupId)
+      ?.members.find((m) => m.id === memberId);
+    if (member) member.active = false;
   }
 
   _clearStore(): void {

@@ -272,6 +272,32 @@ describe("GroupInvitesRepository.accept (PGlite, real schema)", () => {
     expect(members.some((m) => m.userId === returning.id)).toBe(true);
   });
 
+  it("returns the same roster shape as GroupsRepository, former members included", async () => {
+    // Two independent hydrations build the `Group` payload (this one for the
+    // invite-accept response, `GroupsRepository` for the group endpoints). They
+    // have to agree, or the same group would look different depending on which
+    // endpoint returned it — and a client filtering on `active` would break on
+    // whichever one omitted the flag.
+    const repo = new GroupInvitesRepository(db);
+    const { owner, group } = await seedOwnedGroup();
+    await seedMember(db, group.id, "Departed", 4, { active: false });
+    const created = await repo.create(owner.id, { groupId: group.id });
+    if (!created.ok) throw new Error("create failed");
+
+    const joiner = await seedUser(db);
+    const result = await repo.accept(joiner.id, created.token);
+    if (!result.ok) throw new Error("accept failed");
+
+    const departed = result.group.members.find((m) => m.name === "Departed");
+    expect(departed).toMatchObject({ active: false, colourIndex: 4 });
+    expect(
+      result.group.members.every(
+        (m) =>
+          typeof m.active === "boolean" && typeof m.colourIndex === "number",
+      ),
+    ).toBe(true);
+  });
+
   it("returns seat_unavailable when the seat was claimed by someone else after the invite was made", async () => {
     const repo = new GroupInvitesRepository(db);
     const { owner, group } = await seedOwnedGroup();

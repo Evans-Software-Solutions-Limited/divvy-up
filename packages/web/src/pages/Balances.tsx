@@ -5,7 +5,14 @@ import { Avatar } from "@/components/dd/Avatar";
 import { Sheet } from "@/components/dd/Sheet";
 import { Money } from "@/components/dd/Money";
 import { memberColor } from "@/lib/people";
-type Member = { id: string; groupId: string; name: string };
+type Member = {
+  id: string;
+  groupId: string;
+  name: string;
+  /** False for someone removed from the group; they can still owe or be owed. */
+  active?: boolean;
+  colourIndex?: number;
+};
 
 // ─── Settle up sheet ─────────────────────────────────────────────────────────
 
@@ -264,29 +271,40 @@ export function Balances() {
     }[];
   };
 
+  // Keyed over the FULL roster, former members included — a finalized expense
+  // pins its participants, so a debt can name someone who has since left, and
+  // this map is what turns those ids into names. Colour comes from the
+  // server-assigned slot, so a former member mid-list doesn't shift the palette
+  // for everyone after them.
   const memberMap = new Map(
-    group.members.map((m, i) => [m.id, { member: m, index: i }]),
+    group.members.map((m, i) => [
+      m.id,
+      { member: m, index: m.colourIndex ?? i },
+    ]),
   );
 
-  // Determine "payer" perspective — default to first member if no payerId in state
-  const payeeId = payerId ?? group.members[0]?.id ?? "";
+  // Determine "payer" perspective — default to the first CURRENT member if no
+  // payerId in state. Defaulting to a former member would render the whole
+  // screen from the viewpoint of someone no longer in the group.
+  const currentMembers = group.members.filter((m) => m.active !== false);
+  const payeeId = payerId ?? currentMembers[0]?.id ?? "";
   const payeeEntry = memberMap.get(payeeId);
   const payee = payeeEntry?.member;
   const payeeColor = payeeEntry ? memberColor(payeeEntry.index) : "var(--p1)";
 
   // Debts owed TO the payee.
   //
-  // A debtor missing from `memberMap` is someone who has since been removed from
-  // the group (`group.members` is active-only) — they still owe their frozen
-  // share of expenses finalized while they were in it, so the row is labelled
-  // rather than dropped. Dropping it made money quietly disappear from the
-  // screen, with no way to settle it. (Showing their real name needs the API to
-  // return former members; a placeholder is the honest interim.)
+  // A debtor who has left the group still owes their frozen share of expenses
+  // finalized while they were in it, so their row is kept and named — dropping
+  // it made money quietly disappear from the screen with no way to settle it.
+  // The unnamed fallback now only fires on genuinely unknown ids (a balance
+  // referencing a member outside this group's roster), which shouldn't happen.
   const debts: {
     key: string;
     member: Member;
     color: string;
     amount: number;
+    former: boolean;
   }[] = balances
     .filter((b) => b.toMemberId === payeeId)
     .map((b) => {
@@ -298,10 +316,11 @@ export function Balances() {
           ({
             id: b.fromMemberId,
             groupId: group.id,
-            name: "Former member",
+            name: "Unknown member",
           } satisfies Member),
         color: entry ? memberColor(entry.index) : "var(--p2)",
         amount: b.amount,
+        former: entry ? entry.member.active === false : true,
       };
     });
 
@@ -548,10 +567,39 @@ export function Balances() {
                       transition: "opacity .3s",
                     }}
                   >
+                    {/* Deliberately NOT dimmed: the debt is live and settleable,
+                        and Avatar's `dim` reads as "inactive/settled". The
+                        "Left group" badge carries the status instead. */}
                     <Avatar name={d.member.name} color={d.color} size={42} />
                     <div style={{ flex: 1 }}>
-                      <div style={{ fontSize: 16, fontWeight: 700 }}>
+                      <div
+                        style={{
+                          fontSize: 16,
+                          fontWeight: 700,
+                          display: "flex",
+                          alignItems: "center",
+                          gap: 6,
+                        }}
+                      >
                         {d.member.name}
+                        {/* Says why this person isn't in the members list any
+                            more, while keeping their debt visible. */}
+                        {d.former && (
+                          <span
+                            style={{
+                              fontSize: 10.5,
+                              fontWeight: 800,
+                              letterSpacing: 0.3,
+                              textTransform: "uppercase",
+                              color: "var(--ink-3)",
+                              background: "var(--surface-3)",
+                              padding: "2px 6px",
+                              borderRadius: 999,
+                            }}
+                          >
+                            Left group
+                          </span>
+                        )}
                       </div>
                       <div
                         style={{

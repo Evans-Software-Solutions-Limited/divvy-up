@@ -5,19 +5,15 @@ import {
   groups,
   users,
   type Db,
-  type GroupMemberRow,
   type GroupRow,
 } from "@divvy-up/db";
 import type { Group, Member } from "../../domain/types";
 import { isActiveMember } from "./membership";
 import { isUuid } from "./isUuid";
 import { nextColourIndex } from "./colourIndex";
+import { hydrateRoster, toMember } from "./roster";
 import { activityText, recordActivity } from "./activityRepository";
 import { resolveActorMember } from "./resolveMember";
-
-function toMember(row: GroupMemberRow): Member {
-  return { id: row.id, groupId: row.groupId, name: row.name };
-}
 
 function toGroup(row: GroupRow, members: Member[]): Group {
   return {
@@ -66,15 +62,12 @@ export class GroupsRepository {
       .orderBy(asc(groups.createdAt));
     if (groupRows.length === 0) return [];
 
+    // Former members included (see `Member.active`) — the membership gate above
+    // is what scopes the caller; this hydration is the group's full roster.
     const memberRows = await this.db
       .select()
       .from(groupMembers)
-      .where(
-        and(
-          inArray(groupMembers.groupId, groupIds),
-          eq(groupMembers.active, true),
-        ),
-      )
+      .where(inArray(groupMembers.groupId, groupIds))
       .orderBy(asc(groupMembers.createdAt));
 
     const membersByGroup = new Map<string, Member[]>();
@@ -132,13 +125,9 @@ export class GroupsRepository {
     const [row] = await this.db.select().from(groups).where(eq(groups.id, id));
     if (!row) return null;
 
-    const memberRows = await this.db
-      .select()
-      .from(groupMembers)
-      .where(and(eq(groupMembers.groupId, id), eq(groupMembers.active, true)))
-      .orderBy(asc(groupMembers.createdAt));
-
-    return toGroup(row, memberRows.map(toMember));
+    // `isActiveMember` above is what gates the caller; the roster itself is the
+    // group's full membership history (see `hydrateRoster`).
+    return toGroup(row, await hydrateRoster(this.db, id));
   }
 
   /** Returns null unless `userId` is an active member of `groupId` (Req 7.3/7.4). */
@@ -154,12 +143,16 @@ export class GroupsRepository {
     return this.db.transaction(async (tx) => {
       if (!(await isActiveMember(tx, userId, groupId))) return null;
 
-      const activeMembers = await tx
+      // Slots are claimed against the FULL roster, removed members included.
+      // They stay in the group payload (so their frozen debts can be named), and
+      // are rendered alongside current members — so reusing a departed member's
+      // slot would paint two people in the same colour on the same screen. The
+      // cost is that a removed member keeps burning a slot, which only bites past
+      // 8 people ever in one group, where `nextColourIndex` already wraps.
+      const roster = await tx
         .select({ colourIndex: groupMembers.colourIndex })
         .from(groupMembers)
-        .where(
-          and(eq(groupMembers.groupId, groupId), eq(groupMembers.active, true)),
-        );
+        .where(eq(groupMembers.groupId, groupId));
 
       // Known benign race: this read-then-write isn't serialised, so two
       // concurrent addMember calls on the same group can pick the same free slot
@@ -168,9 +161,7 @@ export class GroupsRepository {
       // colour, no integrity loss — and there is no real concurrency in Phase 1
       // (single dev user). A hard fix (advisory lock or a unique constraint that
       // tolerates the >8-member `% 8` wraparound) is deferred to groups-and-members (#5).
-      const colourIndex = nextColourIndex(
-        activeMembers.map((m) => m.colourIndex),
-      );
+      const colourIndex = nextColourIndex(roster.map((m) => m.colourIndex));
 
       const [row] = await tx
         .insert(groupMembers)

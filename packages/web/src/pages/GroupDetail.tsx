@@ -145,9 +145,30 @@ export function GroupDetail() {
     );
   }
 
-  const members =
-    (group as { members: Array<{ id: string; name: string }> }).members ?? [];
-  const memberObjs = members.map((m, i) => ({ ...m, color: memberColor(i) }));
+  // The group payload carries the full roster, including people who have been
+  // removed (`active: false`) so their frozen debts can still be named on the
+  // Balances screen. This screen is about who is in the group, so the roster and
+  // the header count are current members only; former members are listed
+  // separately below rather than silently vanishing. Colour comes from the
+  // server-assigned slot, so a former member mid-roster doesn't shift the
+  // palette for everyone created after them.
+  const roster =
+    (
+      group as {
+        members: Array<{
+          id: string;
+          name: string;
+          active?: boolean;
+          colourIndex?: number;
+        }>;
+      }
+    ).members ?? [];
+  const members = roster.filter((m) => m.active !== false);
+  const formerMembers = roster.filter((m) => m.active === false);
+  const memberObjs = members.map((m, i) => ({
+    ...m,
+    color: memberColor(m.colourIndex ?? i),
+  }));
   const expenseList = (expenses ?? []) as Array<{
     id: string;
     description: string;
@@ -305,6 +326,58 @@ export function GroupDetail() {
             >
               <IconPlus size={14} color="var(--brand-bright)" /> Add
             </button>
+          </div>
+        )}
+
+        {/* People who have left. Shown, not hidden: they can still owe or be
+            owed money on expenses finalized while they were in the group, so
+            silently dropping them would leave those debts unexplained. */}
+        {formerMembers.length > 0 && (
+          <div style={{ marginTop: 14 }}>
+            <div
+              style={{
+                fontSize: 11.5,
+                fontWeight: 800,
+                letterSpacing: 0.4,
+                textTransform: "uppercase",
+                color: "var(--ink-3)",
+                marginBottom: 7,
+              }}
+            >
+              Left the group
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8 }}>
+              {formerMembers.map((m) => (
+                <div
+                  key={m.id}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 8,
+                    background: "var(--surface)",
+                    border: "1px dashed var(--hairline-2)",
+                    borderRadius: 999,
+                    padding: "5px 12px 5px 5px",
+                  }}
+                >
+                  <Avatar
+                    name={m.name}
+                    color={memberColor(m.colourIndex ?? 0)}
+                    size={26}
+                    dim
+                  />
+                  <span
+                    style={{
+                      fontSize: 14,
+                      fontWeight: 700,
+                      color: "var(--ink-3)",
+                    }}
+                  >
+                    {m.name}
+                  </span>
+                </div>
+              ))}
+            </div>
           </div>
         )}
       </div>
