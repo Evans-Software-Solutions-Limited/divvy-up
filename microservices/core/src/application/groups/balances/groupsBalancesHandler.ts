@@ -22,7 +22,6 @@ export const groupsBalancesHandler = new Elysia()
         ctx.params.id,
       );
       const finalized = expenses.filter((e) => e.status === "finalized");
-      const memberIds = group.members.map((m) => m.id);
       const settlements = await ctx.SettlementsRepository.listByGroup(
         userId,
         ctx.params.id,
@@ -30,10 +29,14 @@ export const groupsBalancesHandler = new Elysia()
 
       // Net across all finalized expenses, subtract what's already been paid,
       // then minimise to the fewest transfers ("who owes whom").
+      //
+      // The group's CURRENT member list deliberately plays no part: each
+      // finalized expense already names its own participants (finalize freezes
+      // `everyone` splits), so today's membership can't retroactively rewrite
+      // what a past expense split.
       const balances: Balance[] = computeGroupBalances(
         ctx.params.id,
         finalized,
-        memberIds,
         settlements,
       );
 

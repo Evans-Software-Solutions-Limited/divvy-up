@@ -18,20 +18,16 @@ export const expensesFinalizeHandler = new Elysia()
         ctx.set.status = 404;
         return { error: "Expense not found" };
       }
-      const balances = computeBalances(expense, ctx.body?.memberIds ?? []);
+      // No member list needed: `finalize` has just frozen any `everyone` items
+      // into explicit `equal` rows, so the expense it returned already names
+      // every participant. (The endpoint used to take a `memberIds` body for
+      // this; it was what made a finalized split re-resolvable — and therefore
+      // unstable — so it's gone. A body sent by an older client is ignored.)
+      const balances = computeBalances(expense, []);
       return { expense, balances };
     },
     {
       params: t.Object({ id: t.String() }),
-      body: t.Optional(
-        t.Object({
-          /**
-           * Full member list for the group. Required to resolve
-           * `type: "everyone"` item assignments into per-member balances.
-           */
-          memberIds: t.Optional(t.Array(t.String())),
-        }),
-      ),
       response: {
         200: t.Any(),
         404: t.Object({ error: t.String() }),

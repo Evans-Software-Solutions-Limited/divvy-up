@@ -2,6 +2,7 @@
 // migration (packages/db/drizzle/0000_init.sql), so repository tests exercise
 // actual FK/uuid/check constraints instead of a hand-rolled fake.
 import { fileURLToPath } from "node:url";
+import { readFile } from "node:fs/promises";
 import path from "node:path";
 import { PGlite } from "@electric-sql/pglite";
 import { drizzle } from "drizzle-orm/pglite";
@@ -24,6 +25,22 @@ const MIGRATIONS_FOLDER = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
   "../../../../../../../packages/db/drizzle",
 );
+
+/**
+ * The statements of a committed migration, in order — for testing a DATA
+ * migration's effect (schema migrations are already proven by `migrate()`
+ * running them). Reads the real file so the test can't drift from what ships.
+ */
+export async function readMigrationStatements(tag: string): Promise<string[]> {
+  const sqlText = await readFile(
+    path.join(MIGRATIONS_FOLDER, `${tag}.sql`),
+    "utf8",
+  );
+  return sqlText
+    .split("--> statement-breakpoint")
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
 
 const TABLES = [
   "activity",

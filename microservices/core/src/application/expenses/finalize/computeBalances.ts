@@ -48,9 +48,14 @@ function splitPence(total: number, weights: number[]): number[] {
  * members, payer included) sum to the adjustment amount to the penny.
  *
  * @param expense   The expense to compute balances from.
- * @param memberIds Full member list of the group, used to resolve
- *                  `type: "everyone"` assignments. Pass `[]` if unknown;
- *                  "everyone" items will be skipped.
+ * @param memberIds Member list used to resolve `type: "everyone"` assignments,
+ *                  which only ever appear on DRAFTS: `finalize` materialises
+ *                  them into explicit `equal` rows (see
+ *                  `ExpensesRepository.freezeEveryoneItems`), so a finalized
+ *                  expense is self-describing and this argument does not affect
+ *                  it. Pass `[]` when unknown or when the expense is finalized.
+ *                  An unresolvable "everyone" item is skipped on a draft, but
+ *                  throws on a finalized expense — see below.
  */
 export function computeBalances(
   expense: Expense,
@@ -76,7 +81,20 @@ export function computeBalances(
       participants = assignment.memberIds;
       weights = assignment.memberIds.map(() => 1);
     } else if (assignment.type === "everyone") {
-      if (memberIds.length === 0) continue; // can't resolve without member list
+      if (memberIds.length === 0) {
+        // A FINALIZED expense must never reach here: `finalize` freezes its
+        // `everyone` items into explicit rows, and migration 0003 backfilled the
+        // ones finalized before it did. If one does, the honest response is to
+        // fail rather than quietly drop the item from the balance — that would
+        // under-report a real debt with nothing to show it happened. (Deploying
+        // the code without running the migration is the way to trigger this.)
+        if (expense.status === "finalized") {
+          throw new Error(
+            `Finalized expense ${expense.id} has an unfrozen "everyone" item (${item.id}); run the freeze backfill migration`,
+          );
+        }
+        continue; // draft preview with no member list yet — nothing to resolve
+      }
       participants = memberIds;
       weights = memberIds.map(() => 1);
     } else {
